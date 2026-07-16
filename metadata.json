@@ -1,0 +1,8 @@
+{
+  "name": "Smart Inventory Manager",
+  "description": "Inventory management system with Camera support and Gemini AI image analysis",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
