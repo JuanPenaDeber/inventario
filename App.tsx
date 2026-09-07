@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { LayoutGrid, Settings, ChevronDown, ClipboardList, UserCheck, Menu, X, Wrench } from 'lucide-react';
+import { LayoutGrid, Settings, ChevronDown, ClipboardList, UserCheck, Menu, X, Wrench, ShoppingCart, FileText, LayoutDashboard, Lightbulb } from 'lucide-react';
 import { InventoryItem, ViewState } from './types';
 import { getInventory, addInventoryItem, deleteInventoryItem, updateInventoryItem } from './services/inventoryService';
 import Dashboard from './components/Dashboard';
@@ -9,6 +9,10 @@ import ProviderManager from './components/ProviderManager';
 import LoanManager from './components/LoanManager';
 import AssignmentManager from './components/AssignmentManager';
 import IncidentsModule from './components/incidents/IncidentsModule';
+import PurchaseOrderManager from './components/PurchaseOrderManager';
+import PurchaseRequestManager from './components/PurchaseRequestManager';
+import PurchaseDashboard from './components/PurchaseDashboard';
+import SuggestionManager from './components/SuggestionManager';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
@@ -18,6 +22,20 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const firstLoad = useRef(true);
+
+  // Navegación cruzada entre módulos de compras (Solicitudes <-> Órdenes,
+  // Dashboard -> Solicitud). Cada Manager la consume una sola vez al montar
+  // y avisa que ya la usó (ver onConsumeInitialSearch/onConsumeInitialRequest)
+  // para que una visita posterior por el menú normal no la reaplique.
+  const [purchaseNav, setPurchaseNav] = useState<{ orderReference?: string; requestId?: string }>({});
+  const goToPurchaseOrder = (reference: string) => {
+    setPurchaseNav({ orderReference: reference });
+    setView(ViewState.PURCHASE_ORDERS);
+  };
+  const goToPurchaseRequest = (requestId: string) => {
+    setPurchaseNav({ requestId });
+    setView(ViewState.PURCHASE_REQUESTS);
+  };
 
   // Carga inicial y refresco al cambiar de vista.
   // Gracias a la caché del servicio, los cambios de vista se sirven desde
@@ -121,23 +139,53 @@ const App: React.FC = () => {
                 Incidencias
                 </button>
 
+                <button
+                  onClick={() => setView(ViewState.PURCHASE_REQUESTS)}
+                  className={`text-sm font-medium flex items-center gap-1.5 transition-colors h-16 border-b-2 ${view === ViewState.PURCHASE_REQUESTS ? 'text-cyan-600 border-cyan-600' : 'text-slate-600 border-transparent hover:text-slate-900'}`}
+                >
+                <FileText size={18} />
+                Solicitudes de compra
+                </button>
+
+                <button
+                  onClick={() => setView(ViewState.PURCHASE_ORDERS)}
+                  className={`text-sm font-medium flex items-center gap-1.5 transition-colors h-16 border-b-2 ${view === ViewState.PURCHASE_ORDERS ? 'text-teal-600 border-teal-600' : 'text-slate-600 border-transparent hover:text-slate-900'}`}
+                >
+                <ShoppingCart size={18} />
+                Órdenes de compra
+                </button>
+
+                <button
+                  onClick={() => setView(ViewState.PURCHASE_DASHBOARD)}
+                  className={`text-sm font-medium flex items-center gap-1.5 transition-colors h-16 border-b-2 ${view === ViewState.PURCHASE_DASHBOARD ? 'text-slate-800 border-slate-800' : 'text-slate-600 border-transparent hover:text-slate-900'}`}
+                >
+                <LayoutDashboard size={18} />
+                Dashboard de Compras
+                </button>
+
                 {/* Settings Dropdown */}
                 <div className="relative">
-                <button 
+                <button
                     onClick={() => setShowSettingsMenu(!showSettingsMenu)}
                     className="flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors"
                 >
                     <Settings size={18} />
                     <ChevronDown size={14} />
                 </button>
-                
+
                 {showSettingsMenu && (
                     <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-slate-100 py-1 z-50 animate-in fade-in slide-in-from-top-2">
-                        <button 
+                        <button
                             onClick={() => { setView(ViewState.PROVIDERS); setShowSettingsMenu(false); }}
                             className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
                         >
                             Gestionar proveedores
+                        </button>
+                        <button
+                            onClick={() => { setView(ViewState.PRODUCT_SUGGESTIONS); setShowSettingsMenu(false); }}
+                            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                            Gestionar sugerencias
                         </button>
                     </div>
                 )}
@@ -164,7 +212,11 @@ const App: React.FC = () => {
              <NavButton target={ViewState.LOANS} icon={ClipboardList} label="Pañol / Préstamos" activeColor="orange" />
              <NavButton target={ViewState.ASSIGNMENTS} icon={UserCheck} label="Asignaciones" activeColor="indigo" />
              <NavButton target={ViewState.INCIDENTS} icon={Wrench} label="Incidencias" activeColor="rose" />
+             <NavButton target={ViewState.PURCHASE_REQUESTS} icon={FileText} label="Solicitudes de compra" activeColor="cyan" />
+             <NavButton target={ViewState.PURCHASE_ORDERS} icon={ShoppingCart} label="Órdenes de compra" activeColor="teal" />
+             <NavButton target={ViewState.PURCHASE_DASHBOARD} icon={LayoutDashboard} label="Dashboard de Compras" activeColor="slate" />
              <NavButton target={ViewState.PROVIDERS} icon={Settings} label="Providers / Settings" activeColor="purple" />
+             <NavButton target={ViewState.PRODUCT_SUGGESTIONS} icon={Lightbulb} label="Sugerencias" activeColor="amber" />
           </div>
         )}
         </nav>
@@ -208,6 +260,29 @@ const App: React.FC = () => {
 
                 {view === ViewState.INCIDENTS && (
                     <IncidentsModule />
+                )}
+
+                {view === ViewState.PURCHASE_ORDERS && (
+                    <PurchaseOrderManager
+                        initialSearch={purchaseNav.orderReference}
+                        onConsumeInitialSearch={() => setPurchaseNav({})}
+                    />
+                )}
+
+                {view === ViewState.PURCHASE_REQUESTS && (
+                    <PurchaseRequestManager
+                        initialRequestId={purchaseNav.requestId}
+                        onConsumeInitialRequest={() => setPurchaseNav({})}
+                        onNavigateToOrder={goToPurchaseOrder}
+                    />
+                )}
+
+                {view === ViewState.PURCHASE_DASHBOARD && (
+                    <PurchaseDashboard onNavigateToRequest={goToPurchaseRequest} />
+                )}
+
+                {view === ViewState.PRODUCT_SUGGESTIONS && (
+                    <SuggestionManager />
                 )}
             </>
         )}

@@ -12,7 +12,7 @@ interface DateRangeBarProps {
     /** Total de registros sin filtrar. */
     total: number;
     /** Color de acento, para combinar con el módulo. */
-    accent?: 'orange' | 'indigo';
+    accent?: 'orange' | 'indigo' | 'teal' | 'cyan';
     /** Texto en plural: "préstamos", "asignaciones"... */
     label: string;
 }
@@ -27,6 +27,16 @@ const ACCENT = {
         ring: 'focus:ring-indigo-500',
         btn: 'bg-indigo-600 hover:bg-indigo-700',
         chip: 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200',
+    },
+    teal: {
+        ring: 'focus:ring-teal-500',
+        btn: 'bg-teal-600 hover:bg-teal-700',
+        chip: 'text-teal-700 bg-teal-50 hover:bg-teal-100 border-teal-200',
+    },
+    cyan: {
+        ring: 'focus:ring-cyan-500',
+        btn: 'bg-cyan-600 hover:bg-cyan-700',
+        chip: 'text-cyan-700 bg-cyan-50 hover:bg-cyan-100 border-cyan-200',
     },
 };
 
