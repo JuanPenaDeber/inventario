@@ -12,7 +12,6 @@ import {
     FileBadge,
     Edit,
     ArrowLeft,
-    UserPlus,
     Image as ImageIcon
 } from 'lucide-react';
 import { InventoryItem, Assignment, Employee } from '../types';
@@ -27,6 +26,7 @@ import {
     updateInventoryItem
 } from '../services/inventoryService';
 import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
+import { getLogoUrl, getPhotoUrl } from '../services/photoServer';
 import DateRangeBar from './DateRangeBar';
 
 const AssignmentManager: React.FC = () => {
@@ -220,7 +220,7 @@ const AssignmentManager: React.FC = () => {
         setEmployeeName(selectedAssignment.employeeName);
         setName(selectedAssignment.name);
         setEquipo(selectedAssignment.equipo);
-        setAuthorizerId(selectedAssignment.authorizerId);
+        setAuthorizerId(selectedAssignment.authorizerId || '');
         setAuthorizerName(selectedAssignment.authorizerName || '');
         setDescription(selectedAssignment.description || '');
         setObservacion(selectedAssignment.observacion || '');
@@ -286,7 +286,7 @@ const AssignmentManager: React.FC = () => {
                     <div className="flex justify-between items-end border-b-2 border-black pb-4 mb-8">
 
                         <div>
-                            <img src="http://172.20.16.38/fotos/edlogo.png" width="100" />
+                            <img src={getLogoUrl()} width="100" />
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold uppercase">Acta de Asignación</h1>
@@ -341,7 +341,7 @@ const AssignmentManager: React.FC = () => {
                                         <td className="border border-black p-2 text-center">
                                             {item.foto ? (
                                                 <img
-                                                    src={!item.foto.includes("/") ? ("http://172.20.16.38/fotos/uploads/pequena/" + item.foto) : item.foto}
+                                                    src={getPhotoUrl(item.foto, 'pequena')}
                                                     alt=""
                                                     className="w-12 h-12 object-cover mx-auto border border-gray-300"
                                                 />

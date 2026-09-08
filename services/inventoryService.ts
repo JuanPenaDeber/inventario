@@ -1,5 +1,27 @@
+// =============================================================================
+// NOTA DE ARQUITECTURA — por qué este servicio maneja errores distinto a
+// incidentsService.ts / purchaseOrderService.ts / purchaseRequestService.ts /
+// proformaService.ts / suggestionService.ts:
+//
+// Este archivo (Inventario, Préstamos, Asignaciones, Proveedores, Empleados)
+// atrapa cualquier fallo de red y devuelve datos de respaldo (MOCK_*) o
+// null/valores parciales en vez de lanzar una excepción — es el módulo más
+// usado a diario, y una caída momentánea de EspoCRM no debe dejar al usuario
+// sin poder ver siquiera el inventario.
+//
+// Los servicios de Compras (Fase 1-4) hacen lo opuesto a propósito: lanzan el
+// error y lo muestran en un banner explícito. Ahí ocultar el fallo sería
+// peor — una aprobación, una proforma o una orden de compra que "parece"
+// haberse guardado pero en realidad no llegó a EspoCRM es un problema mucho
+// más serio que ver un mensaje de error.
+//
+// Es una diferencia intencional según el costo de cada error, no un
+// descuido de consistencia entre archivos.
+// =============================================================================
 
-import { InventoryItem, MovementHistory, Provider, Loan, Assignment, LoanItemDetail, Employee } from '../types';
+import { InventoryItem, Provider, Loan, Assignment, Employee } from '../types';
+import { ESPOCRM_API_KEY } from './espoClient';
+import { getPhotoUploadUrl } from './photoServer';
 
 interface ApiResponse<T> {
     list: T[];
@@ -7,7 +29,7 @@ interface ApiResponse<T> {
 }
 
 // API CONFIGURATION
-const API_KEY = '2b4fd11376a17549cba81c63a8840727';
+const API_KEY = ESPOCRM_API_KEY;
 const BASE_URL = 'http://local.grupoeldeber.com/api/v1';
 
 const ENDPOINTS = {
@@ -148,7 +170,7 @@ async function apiRequest<T>(url: string, method: string = 'GET', body?: any): P
         }
         
         return data;
-    } catch (error) {
+    } catch {
         console.warn(`Network Error/Timeout on ${url}. Switching to fallback.`);
         return null;
     }
@@ -252,7 +274,7 @@ export const uploadInventoryImage = async (base64Image: string): Promise<string 
     formData.append('imagen', blob, fileName);
 
     try {
-        const response = await fetch("http://172.20.16.38/fotos/index.php?filename="+fileName, {
+        await fetch(getPhotoUploadUrl(fileName), {
             method: 'POST',
             headers: {
                 'x-api-key': API_KEY
@@ -362,7 +384,7 @@ export const deleteInventoryItem = async (id: string): Promise<void> => {
   await apiRequest(`${ENDPOINTS.ITEMS}/${id}`, 'DELETE');
 };
 
-export const unassignInventoryItem = async (id: string, comment: string): Promise<InventoryItem | null> => {
+export const unassignInventoryItem = async (id: string, _comment: string): Promise<InventoryItem | null> => {
   // Send null to clear assignment
   const updates = {
       assignedEmployeeId: null,
@@ -432,9 +454,6 @@ export const getLoanItems = async (loanId: string): Promise<InventoryItem[]> => 
     // UPDATED: Now uses POST to consult items for a specific loan
     const payload = { prestamoId: loanId };
     const data = await apiRequest<any>(ENDPOINTS.LOAN_CONSULT, 'POST', payload);
-    console.log(data);
-
-    
 
     // Handle standard wrapper with 'list'
     if (data && Array.isArray(data.list)) {
@@ -518,9 +537,6 @@ export const updateLoan = async (id: string, updates: Partial<Loan> & { itemIds?
         payload.fechaHoraDevolucion = updates.fechaHoraDevolucion
             ? new Date(updates.fechaHoraDevolucion).toISOString().replace('T',' ').split('.')[0]
             : null;
-        
-        // Sync legacy field if needed
-        payload.fechaHoraDevolucion = payload.fechaHoraDevolucion;
     }
 
     // 1. Update Header

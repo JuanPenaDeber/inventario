@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   Employee,
@@ -476,9 +477,14 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
       </div>
 
       {error && (
-        <div className="mb-4 flex items-start justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span>{error}</span>
-          <button onClick={() => setError(null)}><X size={16} /></button>
+          <div className="flex items-center gap-3 shrink-0">
+            <button onClick={refresh} className="inline-flex items-center gap-1.5 font-medium hover:text-red-900">
+              <RefreshCw size={14} /> Reintentar
+            </button>
+            <button onClick={() => setError(null)}><X size={16} /></button>
+          </div>
         </div>
       )}
 
@@ -523,6 +529,9 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
           label="solicitudes"
         />
 
+        {/* Oculto si la carga falló, para no mostrar ceros que parezcan
+            datos reales (ver PurchaseDashboard.tsx). */}
+        {!error && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
           {(['BORRADOR', 'PENDIENTE_APROBACION', 'APROBADA', 'RECHAZADA', 'CANCELADA'] as PurchaseRequestStatus[]).map((s) => (
             <div key={s} className="bg-white rounded-xl border border-slate-200 shadow-sm p-3">
@@ -535,6 +544,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
             <p className="text-xl font-bold text-slate-800">{countsByStatus.EN_PROCESO || 0}</p>
           </div>
         </div>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200">

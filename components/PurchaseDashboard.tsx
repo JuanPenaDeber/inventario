@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Clock,
@@ -10,6 +10,8 @@ import {
   ShoppingCart,
   CheckCheck,
   ArrowRight,
+  RefreshCw,
+  WifiOff,
 } from 'lucide-react';
 import { PurchaseRequest, PurchaseRequestStatus, Proforma } from '../types';
 import { getPurchaseRequests, getPurchaseRequestErrorMessage } from '../services/purchaseRequestService';
@@ -45,41 +47,47 @@ const PurchaseDashboard: React.FC<PurchaseDashboardProps> = ({ onNavigateToReque
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const reqData = await getPurchaseRequests();
-        setRequests(reqData);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const reqData = await getPurchaseRequests();
+      setRequests(reqData);
 
-        // Solo tiene sentido revisar vigencia de proformas en solicitudes que
-        // todavía están en etapa de cotización/evaluación.
-        const activeStatuses: PurchaseRequestStatus[] = ['EN_COTIZACION', 'COTIZADA', 'EN_EVALUACION'];
-        const active = reqData.filter((r) => activeStatuses.includes(r.status));
+      // Solo tiene sentido revisar vigencia de proformas en solicitudes que
+      // todavía están en etapa de cotización/evaluación.
+      const activeStatuses: PurchaseRequestStatus[] = ['EN_COTIZACION', 'COTIZADA', 'EN_EVALUACION'];
+      const active = reqData.filter((r) => activeStatuses.includes(r.status));
 
-        const items: ExpiringItem[] = [];
-        for (const request of active) {
-          const proformas = await getProformas(request.id);
-          proformas
-            .filter((p) => !p.voided)
-            .forEach((proforma) => {
-              const validity = getProformaValidity(proforma.expiryDate);
-              if (validity === 'PROXIMA_A_VENCER' || validity === 'VENCIDA') {
-                items.push({ request, proforma, validity });
-              }
-            });
-        }
-        items.sort((a, b) => a.proforma.expiryDate.localeCompare(b.proforma.expiryDate));
-        setExpiringItems(items);
-      } catch (err) {
-        setError(getPurchaseRequestErrorMessage(err, 'No se pudo cargar el dashboard.'));
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+      // Se piden las proformas de todas las solicitudes activas en paralelo
+      // en vez de una por una — con varias solicitudes activas, esto evita
+      // sumar sus latencias de red en una cascada secuencial.
+      const items: ExpiringItem[] = [];
+      const proformasByRequest = await Promise.all(active.map((request) => getProformas(request.id)));
+      active.forEach((request, i) => {
+        proformasByRequest[i]
+          .filter((p) => !p.voided)
+          .forEach((proforma) => {
+            const validity = getProformaValidity(proforma.expiryDate);
+            if (validity === 'PROXIMA_A_VENCER' || validity === 'VENCIDA') {
+              items.push({ request, proforma, validity });
+            }
+          });
+      });
+      items.sort((a, b) => a.proforma.expiryDate.localeCompare(b.proforma.expiryDate));
+      setExpiringItems(items);
+    } catch (err) {
+      setError(getPurchaseRequestErrorMessage(err, 'No se pudo cargar el dashboard.'));
+      setRequests([]);
+      setExpiringItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const count = (s: PurchaseRequestStatus) => requests.filter((r) => r.status === s).length;
   const generatedOrdersCount = requests.filter((r) => !!r.generatedOrderId).length;
@@ -110,13 +118,28 @@ const PurchaseDashboard: React.FC<PurchaseDashboardProps> = ({ onNavigateToReque
         </div>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      )}
-
       {loading ? (
         <div className="flex justify-center py-16">
           <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-slate-600" />
+        </div>
+      ) : error ? (
+        // Importante: si la carga falló, NO se muestran las tarjetas en 0 —
+        // eso parecería "ya se revisó y no hay nada" en vez de "no se pudo
+        // saber". Se muestra solo el estado de error, con botón para reintentar.
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center bg-white rounded-xl border border-dashed border-slate-300">
+          <div className="p-3 bg-red-50 text-red-500 rounded-full">
+            <WifiOff size={28} />
+          </div>
+          <p className="text-slate-700 font-medium max-w-md">{error}</p>
+          <p className="text-slate-400 text-sm max-w-md">
+            Los indicadores no se muestran para evitar confundir "no se pudo conectar" con "no hay datos".
+          </p>
+          <button
+            onClick={load}
+            className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-medium"
+          >
+            <RefreshCw size={15} /> Reintentar
+          </button>
         </div>
       ) : (
         <>
@@ -171,9 +194,11 @@ const PurchaseDashboard: React.FC<PurchaseDashboardProps> = ({ onNavigateToReque
         </>
       )}
 
-      <p className="text-xs text-slate-400 mt-6">
-        Total de solicitudes registradas: {requests.length}.
-      </p>
+      {!loading && !error && (
+        <p className="text-xs text-slate-400 mt-6">
+          Total de solicitudes registradas: {requests.length}.
+        </p>
+      )}
     </div>
   );
 };

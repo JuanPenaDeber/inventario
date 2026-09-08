@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Camera, ScanLine, History, User, Building2, UserCheck, Upload, Image as ImageIcon, AlertTriangle, FileText, Check } from 'lucide-react';
+import { ArrowLeft, Camera, Building2, UserCheck, Upload, Image as ImageIcon, AlertTriangle, FileText, Check } from 'lucide-react';
 import { InventoryItem, Provider, Employee } from '../types';
 import { getProviders, getEmployees, createAssignment, createAssignmentEquipo } from '../services/inventoryService';
+import { getPhotoUrl } from '../services/photoServer';
 import CameraModal from './CameraModal';
 
 interface InventoryFormProps {
@@ -28,7 +29,6 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
   });
   
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'photo' | 'scan'>('photo');
   const [providers, setProviders] = useState<Provider[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,10 +108,6 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
       }
   };
 
-  const handleBarcodeScan = (code: string) => {
-    setFormData(prev => ({ ...prev, serie: code }));
-  };
-
   // Main Submit Handler
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,7 +127,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
 
   // The logic to actually save the Item data
   const processSave = () => {
-    let finalStatus = formData.status;
+    const finalStatus = formData.status;
     const dataToSave = {
         ...formData,
         status: finalStatus,
@@ -183,14 +179,13 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
     }
   };
 
-  const openCamera = (mode: 'photo' | 'scan') => {
+  const openCamera = () => {
     // Basic browser support check
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert('Tu navegador no soporta acceso a cámara. Por favor, usa Chrome, Firefox o Edge.');
       return;
     }
     // Removed specific protocol check to allow HTTP on local IPs (requires browser flags)
-    setCameraMode(mode);
     setIsCameraOpen(true);
   };
 
@@ -222,11 +217,11 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
           <div className="aspect-square bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center relative overflow-hidden group">
             {formData.foto ? (
               <>
-                <img src={ !formData.foto.includes("/")  ? ("http://172.20.16.38/fotos/uploads/mediana/"+formData.foto):formData.foto} alt="Preview" className="w-full h-full object-cover" />
+                <img src={getPhotoUrl(formData.foto, 'mediana')} alt="Preview" className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
                     <button 
                       type="button"
-                      onClick={() => openCamera('photo')}
+                      onClick={() => openCamera()}
                       className="bg-white text-slate-900 px-4 py-2 rounded-lg font-medium hover:bg-slate-100 flex items-center gap-2"
                     >
                       <Camera size={18} /> Tomar otra foto
@@ -249,7 +244,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
                 <div className="flex flex-col gap-2">
                     <button 
                         type="button"
-                        onClick={() => openCamera('photo')}
+                        onClick={() => openCamera()}
                         className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 w-full flex items-center justify-center gap-2"
                     >
                         <Camera size={18} /> Tomar foto
@@ -334,23 +329,13 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
 
             <div>
                <label className="block text-sm font-medium text-slate-700 mb-1">Serie / Codigo de barra</label>
-               <div className="flex gap-2">
-                 <input 
-                   type="text" 
-                   name="serie"
-                   value={formData.serie}
-                   onChange={handleInputChange}
-                   className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                 />
-                 <button 
-                    type="button"
-                    onClick={() => openCamera('scan')}
-                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-300"
-                    title="Escane la serie o código de barra"
-                 >
-                   <ScanLine size={20} />
-                 </button>
-               </div>
+               <input
+                 type="text"
+                 name="serie"
+                 value={formData.serie}
+                 onChange={handleInputChange}
+                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+               />
             </div>
 
             <div>
@@ -559,12 +544,10 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
           </div>
       )}
 
-      <CameraModal 
-        isOpen={isCameraOpen} 
+      <CameraModal
+        isOpen={isCameraOpen}
         onClose={() => setIsCameraOpen(false)}
         onCapture={handleImageCapture}
-        onScan={handleBarcodeScan}
-        mode={cameraMode}
       />
     </div>
   );

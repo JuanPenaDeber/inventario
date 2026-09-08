@@ -1,6 +1,6 @@
 {
   "name": "Smart Inventory Manager",
-  "description": "Inventory management system with Camera support and Gemini AI image analysis",
+  "description": "Inventory management system with camera support for photos and barcode capture",
   "requestFramePermissions": [
     "camera",
     "microphone"

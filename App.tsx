@@ -1,21 +1,70 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { LayoutGrid, Settings, ChevronDown, ClipboardList, UserCheck, Menu, X, Wrench, ShoppingCart, FileText, LayoutDashboard, Lightbulb } from 'lucide-react';
 import { InventoryItem, ViewState } from './types';
 import { getInventory, addInventoryItem, deleteInventoryItem, updateInventoryItem } from './services/inventoryService';
-import Dashboard from './components/Dashboard';
-import InventoryForm from './components/InventoryForm';
-import ProviderManager from './components/ProviderManager';
-import LoanManager from './components/LoanManager';
-import AssignmentManager from './components/AssignmentManager';
-import IncidentsModule from './components/incidents/IncidentsModule';
-import PurchaseOrderManager from './components/PurchaseOrderManager';
-import PurchaseRequestManager from './components/PurchaseRequestManager';
-import PurchaseDashboard from './components/PurchaseDashboard';
-import SuggestionManager from './components/SuggestionManager';
+
+// Cada módulo carga su propio JS solo cuando se visita, en vez de que todos
+// (Compras incluido, que es el más pesado) vayan en el bundle inicial de
+// cualquiera que solo quiera ver el Dashboard de inventario.
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const InventoryForm = lazy(() => import('./components/InventoryForm'));
+const ProviderManager = lazy(() => import('./components/ProviderManager'));
+const LoanManager = lazy(() => import('./components/LoanManager'));
+const AssignmentManager = lazy(() => import('./components/AssignmentManager'));
+const IncidentsModule = lazy(() => import('./components/incidents/IncidentsModule'));
+const PurchaseOrderManager = lazy(() => import('./components/PurchaseOrderManager'));
+const PurchaseRequestManager = lazy(() => import('./components/PurchaseRequestManager'));
+const PurchaseDashboard = lazy(() => import('./components/PurchaseDashboard'));
+const SuggestionManager = lazy(() => import('./components/SuggestionManager'));
+
+// Clases completas por color (no construidas con template literals): el CDN
+// de Tailwind que usa este proyecto escanea el DOM ya renderizado, así que
+// `text-${activeColor}-600` funciona hoy por casualidad — pero se rompería
+// silenciosamente si el proyecto migra a un build real de Tailwind con
+// PostCSS (que escanea el código fuente, no el DOM).
+const NAV_ACTIVE_COLOR: Record<string, string> = {
+  blue: 'text-blue-600 bg-blue-50',
+  orange: 'text-orange-600 bg-orange-50',
+  indigo: 'text-indigo-600 bg-indigo-50',
+  rose: 'text-rose-600 bg-rose-50',
+  cyan: 'text-cyan-600 bg-cyan-50',
+  teal: 'text-teal-600 bg-teal-50',
+  slate: 'text-slate-600 bg-slate-50',
+  purple: 'text-purple-600 bg-purple-50',
+  amber: 'text-amber-600 bg-amber-50',
+};
+
+interface NavButtonProps {
+  target: ViewState;
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  activeColor: string;
+}
+
+const PageSpinner: React.FC = () => (
+  <div className="flex justify-center items-center h-64">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  </div>
+);
+
+// --- Ruteo simple por hash de la URL (sin dependencias nuevas) -------------
+// Antes, toda la navegación vivía solo en memoria: recargar la página
+// siempre volvía al Dashboard, no se podía compartir/guardar un enlace a una
+// pantalla concreta, y el botón atrás del navegador no hacía nada dentro de
+// la app. ADD_ITEM/EDIT_ITEM quedan fuera a propósito: dependen de
+// `editingItem` (un objeto completo), que no es serializable a una URL.
+const ROUTABLE_VIEWS = new Set<string>(
+  Object.values(ViewState).filter((v) => v !== ViewState.ADD_ITEM && v !== ViewState.EDIT_ITEM),
+);
+
+function getViewFromHash(): ViewState {
+  const hash = window.location.hash.replace('#', '');
+  return ROUTABLE_VIEWS.has(hash) ? (hash as ViewState) : ViewState.DASHBOARD;
+}
 
 const App: React.FC = () => {
-  const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  const [view, setView] = useState<ViewState>(() => getViewFromHash());
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
@@ -37,11 +86,34 @@ const App: React.FC = () => {
     setView(ViewState.PURCHASE_REQUESTS);
   };
 
-  // Carga inicial y refresco al cambiar de vista.
-  // Gracias a la caché del servicio, los cambios de vista se sirven desde
+  // Refleja la vista actual en la URL (para compartir/recargar sin perderla).
+  useEffect(() => {
+    if (view === ViewState.ADD_ITEM || view === ViewState.EDIT_ITEM) return;
+    if (window.location.hash.replace('#', '') !== view) {
+      window.location.hash = view;
+    }
+  }, [view]);
+
+  // Botón atrás/adelante del navegador.
+  useEffect(() => {
+    const onHashChange = () => {
+      setView(getViewFromHash());
+      setEditingItem(undefined);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // Carga inicial y refresco al volver al Dashboard.
+  // Solo el Dashboard usa `items` (InventoryForm recibe su propio
+  // `editingItem`, no la lista completa) — antes este efecto recargaba el
+  // inventario en CADA cambio de vista, incluso yendo a Incidencias o
+  // Solicitudes de Compra, que no lo necesitan para nada.
+  // Gracias a la caché del servicio, volver al Dashboard se sirve desde
   // memoria (instantáneo). El spinner que bloquea la pantalla solo aparece
   // en la PRIMERA carga; después el contenido se muestra mientras se refresca.
   useEffect(() => {
+    if (view !== ViewState.DASHBOARD) return;
     const loadItems = async () => {
         if (firstLoad.current) setLoading(true);
         const data = await getInventory();
@@ -82,11 +154,11 @@ const App: React.FC = () => {
     setView(ViewState.EDIT_ITEM);
   };
 
-  const NavButton = ({ target, icon: Icon, label, activeColor }: any) => (
-    <button 
-      onClick={() => { setView(target); setIsMobileMenuOpen(false); }} 
+  const NavButton = ({ target, icon: Icon, label, activeColor }: NavButtonProps) => (
+    <button
+      onClick={() => { setView(target); setIsMobileMenuOpen(false); }}
       className={`text-sm font-medium flex items-center gap-2 transition-colors px-3 py-2 rounded-lg w-full text-left
-        ${view === target ? `text-${activeColor}-600 bg-${activeColor}-50` : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+        ${view === target ? NAV_ACTIVE_COLOR[activeColor] : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
     >
       <Icon size={18} />
       {label}
@@ -222,70 +294,71 @@ const App: React.FC = () => {
         </nav>
 
         {/* Main Content */}
+        {/* El spinner de `loading` aplica SOLO al Dashboard (es lo único que
+            depende de `items`) — cada otro módulo maneja su propia carga
+            internamente, igual que ya hacían Préstamos/Asignaciones/etc. */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:max-w-none">
-        {loading ? (
-            <div className="flex justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            </div>
-        ) : (
-            <>
-                {view === ViewState.DASHBOARD && (
-                    <Dashboard 
-                    items={items} 
+          <Suspense fallback={<PageSpinner />}>
+            {view === ViewState.DASHBOARD && (
+                loading ? (
+                    <PageSpinner />
+                ) : (
+                    <Dashboard
+                    items={items}
                     onAddItem={() => { setEditingItem(undefined); setView(ViewState.ADD_ITEM); }}
                     onEditItem={handleEditItem}
                     onDeleteItem={handleDeleteItem}
                     />
-                )}
+                )
+            )}
 
-                {(view === ViewState.ADD_ITEM || view === ViewState.EDIT_ITEM) && (
-                    <InventoryForm 
-                    initialData={editingItem}
-                    onSave={handleSaveItem}
-                    onCancel={() => { setEditingItem(undefined); setView(ViewState.DASHBOARD); }}
-                    />
-                )}
+            {(view === ViewState.ADD_ITEM || view === ViewState.EDIT_ITEM) && (
+                <InventoryForm
+                initialData={editingItem}
+                onSave={handleSaveItem}
+                onCancel={() => { setEditingItem(undefined); setView(ViewState.DASHBOARD); }}
+                />
+            )}
 
-                {view === ViewState.PROVIDERS && (
-                    <ProviderManager />
-                )}
+            {view === ViewState.PROVIDERS && (
+                <ProviderManager />
+            )}
 
-                {view === ViewState.LOANS && (
-                    <LoanManager />
-                )}
+            {view === ViewState.LOANS && (
+                <LoanManager />
+            )}
 
-                {view === ViewState.ASSIGNMENTS && (
-                    <AssignmentManager />
-                )}
+            {view === ViewState.ASSIGNMENTS && (
+                <AssignmentManager />
+            )}
 
-                {view === ViewState.INCIDENTS && (
-                    <IncidentsModule />
-                )}
+            {view === ViewState.INCIDENTS && (
+                <IncidentsModule />
+            )}
 
-                {view === ViewState.PURCHASE_ORDERS && (
-                    <PurchaseOrderManager
-                        initialSearch={purchaseNav.orderReference}
-                        onConsumeInitialSearch={() => setPurchaseNav({})}
-                    />
-                )}
+            {view === ViewState.PURCHASE_ORDERS && (
+                <PurchaseOrderManager
+                    initialSearch={purchaseNav.orderReference}
+                    onConsumeInitialSearch={() => setPurchaseNav({})}
+                />
+            )}
 
-                {view === ViewState.PURCHASE_REQUESTS && (
-                    <PurchaseRequestManager
-                        initialRequestId={purchaseNav.requestId}
-                        onConsumeInitialRequest={() => setPurchaseNav({})}
-                        onNavigateToOrder={goToPurchaseOrder}
-                    />
-                )}
+            {view === ViewState.PURCHASE_REQUESTS && (
+                <PurchaseRequestManager
+                    initialRequestId={purchaseNav.requestId}
+                    onConsumeInitialRequest={() => setPurchaseNav({})}
+                    onNavigateToOrder={goToPurchaseOrder}
+                />
+            )}
 
-                {view === ViewState.PURCHASE_DASHBOARD && (
-                    <PurchaseDashboard onNavigateToRequest={goToPurchaseRequest} />
-                )}
+            {view === ViewState.PURCHASE_DASHBOARD && (
+                <PurchaseDashboard onNavigateToRequest={goToPurchaseRequest} />
+            )}
 
-                {view === ViewState.PRODUCT_SUGGESTIONS && (
-                    <SuggestionManager />
-                )}
-            </>
-        )}
+            {view === ViewState.PRODUCT_SUGGESTIONS && (
+                <SuggestionManager />
+            )}
+          </Suspense>
         </main>
     </div>
   );

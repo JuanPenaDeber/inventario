@@ -89,26 +89,20 @@
 import { PurchaseRequest, PurchaseRequestLine, PurchaseRequestHistoryEntry, PurchaseRequestStatus } from '../types';
 import { getProformas, getProforma } from './proformaService';
 import { createPurchaseOrder } from './purchaseOrderService';
+import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch } from './espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
 export const PURCHASE_REQUESTS_API_URL =
-  (import.meta as any).env?.VITE_PURCHASE_REQUESTS_API_URL ??
+  import.meta.env.VITE_PURCHASE_REQUESTS_API_URL ??
   'http://local.grupoeldeber.com/api/v1';
 
-const ENTITY = (import.meta as any).env?.VITE_PURCHASE_REQUEST_ENTITY ?? 'CSolicitudCompra';
+const ENTITY = import.meta.env.VITE_PURCHASE_REQUEST_ENTITY ?? 'CSolicitudCompra';
 const LINES_SUBRESOURCE =
-  (import.meta as any).env?.VITE_PURCHASE_REQUEST_LINES_SUBRESOURCE ?? 'detalle';
+  import.meta.env.VITE_PURCHASE_REQUEST_LINES_SUBRESOURCE ?? 'detalle';
 const HISTORY_SUBRESOURCE =
-  (import.meta as any).env?.VITE_PURCHASE_REQUEST_HISTORY_SUBRESOURCE ?? 'historial';
+  import.meta.env.VITE_PURCHASE_REQUEST_HISTORY_SUBRESOURCE ?? 'historial';
 
-// API key del usuario "inventario" en EspoCRM (misma usada por el resto de la app).
-const API_KEY = '2b4fd11376a17549cba81c63a8840727';
-
-const HEADERS = {
-  'X-Api-Key': API_KEY,
-  'Content-Type': 'application/json',
-};
 
 const LIST_PAGE_SIZE = 200;
 // Tope de páginas al recorrer el listado completo (ver getPurchaseRequests).
@@ -221,49 +215,18 @@ export function isSelfSupervised(requesterId: string, supervisorId: string): boo
   return !!requesterId && requesterId === supervisorId;
 }
 
-// --- MANEJO DE ERRORES ------------------------------------------------------
-
-class ApiError extends Error {
-  status: number;
-  reason: string;
-  constructor(status: number, reason: string) {
-    super(reason || `HTTP ${status}`);
-    this.status = status;
-    this.reason = reason;
-  }
-}
+// --- MANEJO DE ERRORES Y FETCH (ver services/espoClient.ts) -----------------
 
 /** Traduce el error a un mensaje legible para el usuario. */
 export function getPurchaseRequestErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.status === 403)
-      return 'Sin permiso sobre las solicitudes de compra. Revisa el rol del usuario API en EspoCRM.';
-    if (error.reason) return error.reason;
-    return fallback;
-  }
-  if (error instanceof TypeError) {
-    return 'No se pudo conectar con el servidor. Verifica la red o que EspoCRM esté activo.';
-  }
-  // Errores de validación propios de este servicio (transiciones de estado,
-  // reglas de negocio, etc.) llevan su mensaje ya listo para el usuario.
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
+  return getEspoErrorMessage(
+    error,
+    fallback,
+    'Sin permiso sobre las solicitudes de compra. Revisa el rol del usuario API en EspoCRM.',
+  );
 }
 
-/** Wrapper de fetch con la API key de EspoCRM y errores normalizados. */
-async function espoFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${PURCHASE_REQUESTS_API_URL}${path}`, {
-    ...options,
-    headers: { ...HEADERS, ...(options.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const reason = res.headers.get('X-Status-Reason') ?? '';
-    throw new ApiError(res.status, reason);
-  }
-  return res;
-}
+const espoFetch = createEspoFetch(PURCHASE_REQUESTS_API_URL);
 
 // --- UTILIDADES --------------------------------------------------------------
 
@@ -960,6 +923,7 @@ export async function generatePurchaseOrder(id: string, actorName: string): Prom
     throw new Error(
       `Se generó la orden de compra "${order.reference}" correctamente, pero no se pudo actualizar ` +
       `la solicitud ${current.code} (quedó desincronizada). Verifica manualmente ambos registros.`,
+      { cause: err },
     );
   }
 

@@ -51,31 +51,24 @@
 // =============================================================================
 
 import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus } from '../types';
+import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, round2 } from './espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
 // URL base de EspoCRM. Sobreescribible con VITE_PURCHASE_ORDERS_API_URL en el .env.
 export const PURCHASE_ORDERS_API_URL =
-  (import.meta as any).env?.VITE_PURCHASE_ORDERS_API_URL ??
+  import.meta.env.VITE_PURCHASE_ORDERS_API_URL ??
   'http://local.grupoeldeber.com/api/v1';
 
 // Nombre de la entidad en EspoCRM y del sub-recurso de líneas (ver nota de
 // contrato pendiente arriba). Ambos configurables sin tocar el resto del código.
-const ENTITY = (import.meta as any).env?.VITE_PURCHASE_ORDER_ENTITY ?? 'COrdenCompra';
+const ENTITY = import.meta.env.VITE_PURCHASE_ORDER_ENTITY ?? 'COrdenCompra';
 const LINES_SUBRESOURCE =
-  (import.meta as any).env?.VITE_PURCHASE_ORDER_LINES_SUBRESOURCE ?? 'lineas';
-
-// API key del usuario "inventario" en EspoCRM (misma usada por el resto de la app).
-const API_KEY = '2b4fd11376a17549cba81c63a8840727';
-
-const HEADERS = {
-  'X-Api-Key': API_KEY,
-  'Content-Type': 'application/json',
-};
+  import.meta.env.VITE_PURCHASE_ORDER_LINES_SUBRESOURCE ?? 'lineas';
 
 // % de impuesto por defecto al crear una orden nueva. Editable en el formulario.
 export const DEFAULT_TAX_RATE_PERCENT = Number(
-  (import.meta as any).env?.VITE_PURCHASE_ORDER_TAX_RATE ?? 13,
+  import.meta.env.VITE_PURCHASE_ORDER_TAX_RATE ?? 13,
 );
 
 // Monedas sugeridas para el desplegable (campo Varchar en EspoCRM: no limita).
@@ -187,55 +180,20 @@ export function getSelectableStatuses(current: PurchaseOrderStatus): PurchaseOrd
 /** Estados válidos para el `estado` inicial de una orden recién creada. */
 export const INITIAL_STATUSES: PurchaseOrderStatus[] = ['BORRADOR', 'SOLICITADA'];
 
-// --- MANEJO DE ERRORES ------------------------------------------------------
-
-class ApiError extends Error {
-  status: number;
-  reason: string;
-  constructor(status: number, reason: string) {
-    super(reason || `HTTP ${status}`);
-    this.status = status;
-    this.reason = reason;
-  }
-}
+// --- MANEJO DE ERRORES Y FETCH (ver services/espoClient.ts) -----------------
 
 /** Traduce el error a un mensaje legible para el usuario. */
 export function getPurchaseOrderErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.status === 403)
-      return 'Sin permiso sobre las órdenes de compra. Revisa el rol del usuario API en EspoCRM.';
-    if (error.reason) return error.reason;
-    return fallback;
-  }
-  if (error instanceof TypeError) {
-    return 'No se pudo conectar con el servidor. Verifica la red o que EspoCRM esté activo.';
-  }
-  // Errores de validación propios de este servicio (transiciones de estado,
-  // cantidades inválidas, etc.) llevan su mensaje ya listo para el usuario.
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
+  return getEspoErrorMessage(
+    error,
+    fallback,
+    'Sin permiso sobre las órdenes de compra. Revisa el rol del usuario API en EspoCRM.',
+  );
 }
 
-/** Wrapper de fetch con la API key de EspoCRM y errores normalizados. */
-async function espoFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${PURCHASE_ORDERS_API_URL}${path}`, {
-    ...options,
-    headers: { ...HEADERS, ...(options.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const reason = res.headers.get('X-Status-Reason') ?? '';
-    throw new ApiError(res.status, reason);
-  }
-  return res;
-}
+const espoFetch = createEspoFetch(PURCHASE_ORDERS_API_URL);
 
 // --- CÁLCULOS (compartidos entre el servicio y el formulario) --------------
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 /** Subtotal de una línea: cantidad solicitada * precio unitario. */
 export function calculateLineSubtotal(quantityRequested: number, unitPrice: number): number {

@@ -11,6 +11,7 @@ import {
   Calendar,
   FileText,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { PurchaseOrder, PurchaseOrderStatus, PURCHASE_ORDER_STATUSES } from '../types';
 import {
@@ -23,6 +24,7 @@ import {
   getPurchaseOrderErrorMessage,
 } from '../services/purchaseOrderService';
 import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
+import { getLogoUrl } from '../services/photoServer';
 import DateRangeBar from './DateRangeBar';
 import PurchaseOrderForm, { PurchaseOrderFormValues } from './PurchaseOrderForm';
 
@@ -319,7 +321,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
       {selectedOrder && (
         <div className="hidden-on-screen print-area bg-white text-black">
           <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-center">
-            <img src="http://172.20.16.38/fotos/edlogo.png" className="h-12" alt="Logo" />
+            <img src={getLogoUrl()} className="h-12" alt="Logo" />
             <div className="text-right">
               <h1 className="text-xl font-bold uppercase">Orden de Compra</h1>
               <p className="text-xs font-mono mt-1">Ref: {selectedOrder.reference}</p>
@@ -418,9 +420,14 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
       </div>
 
       {error && (
-        <div className="no-print mb-4 flex items-start justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="no-print mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span>{error}</span>
-          <button onClick={() => setError(null)}><X size={16} /></button>
+          <div className="flex items-center gap-3 shrink-0">
+            <button onClick={refresh} className="inline-flex items-center gap-1.5 font-medium hover:text-red-900">
+              <RefreshCw size={14} /> Reintentar
+            </button>
+            <button onClick={() => setError(null)}><X size={16} /></button>
+          </div>
         </div>
       )}
 
@@ -467,7 +474,9 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
           label="órdenes"
         />
 
-        {/* Resumen de totales */}
+        {/* Resumen de totales — oculto si la carga falló, para no mostrar
+            ceros que parezcan datos reales (ver PurchaseDashboard.tsx). */}
+        {!error && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
           {PURCHASE_ORDER_STATUSES.map((s) => (
             <div key={s} className="bg-white rounded-xl border border-slate-200 shadow-sm p-3">
@@ -476,7 +485,8 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
             </div>
           ))}
         </div>
-        {Object.keys(totalsByCurrency).length > 0 && (
+        )}
+        {!error && Object.keys(totalsByCurrency).length > 0 && (
           <div className="flex flex-wrap gap-3">
             {Object.entries(totalsByCurrency).map(([currency, total]: [string, number]) => (
               <div key={currency} className="bg-teal-50 border border-teal-200 rounded-lg px-4 py-2 text-sm text-teal-800">

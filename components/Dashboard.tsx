@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Search, Package, DollarSign, AlertCircle, Filter, ArrowUpDown, UserCheck, CheckCircle } from 'lucide-react';
 import { InventoryItem } from '../types';
+import { getPhotoUrl } from '../services/photoServer';
 
 interface DashboardProps {
   items: InventoryItem[];
@@ -15,7 +16,7 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'precio'>('date');
 
   const filteredItems = useMemo(() => {
-    let result = items.filter(item => {
+    const result = items.filter(item => {
       const matchesSearch = 
         item.name.toLowerCase().includes(search.toLowerCase()) || 
         (item.serie && item.serie.toLowerCase().includes(search.toLowerCase())) ||
@@ -198,7 +199,7 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
                          {item.foto ? (
-                            <img src={"http://172.20.16.38/fotos/uploads/pequena/"+item.foto} alt="" className="w-full h-full object-cover" />
+                            <img src={getPhotoUrl(item.foto, 'pequena')} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-slate-400">
                               <Package size={16} />

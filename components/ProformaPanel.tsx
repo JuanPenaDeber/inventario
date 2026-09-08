@@ -98,6 +98,9 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
   const [justification, setJustification] = useState('');
   const [selectionNotes, setSelectionNotes] = useState('');
 
+  const [voidingProforma, setVoidingProforma] = useState<Proforma | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -243,25 +246,26 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
     }
   };
 
-  const handleVoidProforma = async (proforma: Proforma) => {
+  const handleConfirmVoid = async () => {
+    if (!voidingProforma) return;
     if (!requireActor()) return;
-    const reason = window.prompt(`Motivo de anulación de la proforma de ${proforma.providerName || proforma.providerId}:`);
-    if (reason === null) return; // Canceló el prompt.
-    if (!reason.trim()) {
+    if (!voidReason.trim()) {
       setError('El motivo de anulación es obligatorio.');
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await voidProforma(proforma.id, reason.trim());
+      await voidProforma(voidingProforma.id, voidReason.trim());
       await logPurchaseRequestEvent(
         request.id,
         actingEmployeeName,
-        `Anuló la proforma de ${proforma.providerName || proforma.providerId}`,
+        `Anuló la proforma de ${voidingProforma.providerName || voidingProforma.providerId}`,
         request.status,
-        reason.trim(),
+        voidReason.trim(),
       );
+      setVoidingProforma(null);
+      setVoidReason('');
       await load();
     } catch (err) {
       setError(getProformaErrorMessage(err, 'No se pudo anular la proforma.'));
@@ -400,7 +404,7 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
                       </span>
                     ) : isCompras && (request.status === 'EN_COTIZACION' || request.status === 'COTIZADA') ? (
                       <button
-                        onClick={() => handleVoidProforma(p)}
+                        onClick={() => { setVoidingProforma(p); setVoidReason(''); setError(null); }}
                         disabled={busy}
                         title="Anular proforma"
                         className="shrink-0 p-1 text-slate-400 hover:text-red-600 disabled:opacity-30"
@@ -430,6 +434,39 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {voidingProforma && (
+          <div className="mt-3 border-t border-slate-200 pt-3">
+            <h4 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+              <Ban size={15} className="text-red-500" />
+              Anular proforma de {voidingProforma.providerName || voidingProforma.providerId}
+            </h4>
+            <label className={labelCls}>Motivo de anulación (obligatorio)</label>
+            <textarea
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              rows={2}
+              autoFocus
+              className={inputCls}
+              placeholder="Ej: precio cargado por error, proveedor se retractó..."
+            />
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                onClick={() => { setVoidingProforma(null); setVoidReason(''); }}
+                className="px-3 py-1.5 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmVoid}
+                disabled={busy}
+                className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 disabled:bg-slate-300 text-white rounded-lg font-medium"
+              >
+                Confirmar anulación
+              </button>
+            </div>
           </div>
         )}
 

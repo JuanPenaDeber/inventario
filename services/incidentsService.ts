@@ -4,26 +4,21 @@
 // el proyecto es 100% estático: basta `npm run build` + copiar dist/.
 // =============================================================================
 import { downloadXlsx } from './reportUtils';
+import { getEspoErrorMessage, createEspoFetch } from './espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
 // URL base de EspoCRM. Sobreescribible con VITE_INCIDENTS_API_URL en el .env.
 export const INCIDENTS_API_URL =
-  (import.meta as any).env?.VITE_INCIDENTS_API_URL ??
+  import.meta.env.VITE_INCIDENTS_API_URL ??
   'http://local.grupoeldeber.com/api/v1';
 
-// Entidad personalizada de EspoCRM y API key del usuario "inventario".
+// Entidad personalizada de EspoCRM.
 const ENTITY = 'CIncidencia';
-const API_KEY = '2b4fd11376a17549cba81c63a8840727';
-
-const HEADERS = {
-  'X-Api-Key': API_KEY,
-  'Content-Type': 'application/json',
-};
 
 // Contraseña fija del panel administrativo (temporal, sin JWT).
 export const ADMIN_PASSWORD =
-  (import.meta as any).env?.VITE_ADMIN_PASSWORD ?? 'eldeber2026';
+  import.meta.env.VITE_ADMIN_PASSWORD ?? 'eldeber2026';
 
 // Dominio corporativo obligatorio para el correo del usuario.
 export const CORPORATE_DOMAIN = '@grupoeldeber.com';
@@ -126,44 +121,17 @@ export interface IncidentFilters {
 
 // --- MANEJO DE ERRORES ------------------------------------------------------
 
-class ApiError extends Error {
-  status: number;
-  reason: string;
-  constructor(status: number, reason: string) {
-    super(reason || `HTTP ${status}`);
-    this.status = status;
-    this.reason = reason;
-  }
-}
-
 /** Traduce el error a un mensaje legible para el usuario. */
 export function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.status === 403)
-      return 'Sin permiso sobre las incidencias. Revisa el rol del usuario API en EspoCRM.';
-    if (error.reason) return error.reason;
-    return fallback;
-  }
-  if (error instanceof TypeError) {
-    // fetch lanza TypeError cuando no puede conectar.
-    return 'No se pudo conectar con el servidor. Verifica la red o que EspoCRM esté activo.';
-  }
-  return fallback;
+  return getEspoErrorMessage(
+    error,
+    fallback,
+    'Sin permiso sobre las incidencias. Revisa el rol del usuario API en EspoCRM.',
+  );
 }
 
-/** Wrapper de fetch con la API key de EspoCRM y errores normalizados. */
-async function espoFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${INCIDENTS_API_URL}${path}`, {
-    ...options,
-    headers: { ...HEADERS, ...(options.headers ?? {}) },
-  });
-  if (!res.ok) {
-    // EspoCRM manda el motivo del error en el header X-Status-Reason.
-    const reason = res.headers.get('X-Status-Reason') ?? '';
-    throw new ApiError(res.status, reason);
-  }
-  return res;
-}
+/** Wrapper de fetch con la API key de EspoCRM, timeout y errores normalizados. */
+const espoFetch = createEspoFetch(INCIDENTS_API_URL);
 
 // --- MAPEO EspoCRM <-> Frontend ---------------------------------------------
 

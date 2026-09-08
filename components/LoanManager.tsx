@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-    Calendar,
     ClipboardList,
     Search,
     User,
@@ -20,6 +19,7 @@ import {
 import { InventoryItem, Loan, Employee } from '../types';
 import { getInventory, getLoans, createLoan, returnLoanItems, updateLoan, getEmployees, addEmployee, getLoanItems } from '../services/inventoryService';
 import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
+import { getLogoUrl } from '../services/photoServer';
 import DateRangeBar from './DateRangeBar';
 
 const LoanManager: React.FC = () => {
@@ -37,16 +37,13 @@ const LoanManager: React.FC = () => {
     // Form State
     const [formId, setFormId] = useState<string | null>(null);
     const [name, setName] = useState(''); // Referencia
-    const [borrowerId, setBorrowerId] = useState(''); // Responsable ID
     const [borrowerContact, setBorrowerContact] = useState('');
-    const [solicitante, setSolicitante] = useState(''); // Solicitante Name
     const [solicitanteId, setSolicitanteId] = useState('');
     const [entregadoporId, setEntregadoporId] = useState('');
     const [responsableId, setResponsableId] = useState('');
     const [fechaEsperadaDevolucion, setFechaEsperadaDevolucion] = useState('');
     const [fechaPrestamo, setfechaPrestamo] = useState(''); // New: Fecha Prestamo
     const [fechaHoraDevolucion, setFechaHoraDevolucion] = useState(''); // Real Return Date
-    const [authorizedBy, setAuthorizedBy] = useState(''); // Entregado Por (Display)
     const [observations, setObservations] = useState('');
     const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
     const [itemSearch, setItemSearch] = useState('');
@@ -136,10 +133,6 @@ const LoanManager: React.FC = () => {
 
     const handleEntregadoporChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         setEntregadoporId(e.target.value);
-    };
-
-    const handleSolicitanteChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        setSolicitante(e.target.value);
     };
 
     const handleAddQuickEmployee = async () => {
@@ -359,7 +352,7 @@ const LoanManager: React.FC = () => {
                 <div className="hidden-on-screen print-area bg-white text-black">
                     <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-center">
                         <div>
-                            <img src="http://172.20.16.38/fotos/edlogo.png" className="h-12" alt="Logo" />
+                            <img src={getLogoUrl()} className="h-12" alt="Logo" />
                         </div>
                         <div className="text-right">
                             <h1 className="text-xl font-bold uppercase">Comprobante de Préstamo</h1>

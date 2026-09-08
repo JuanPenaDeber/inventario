@@ -59,32 +59,26 @@
 // =============================================================================
 
 import { Proforma, ProformaLine, ProformaValidity } from '../types';
+import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, round2 } from './espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
 export const PROFORMAS_API_URL =
-  (import.meta as any).env?.VITE_PROFORMAS_API_URL ?? 'http://local.grupoeldeber.com/api/v1';
+  import.meta.env.VITE_PROFORMAS_API_URL ?? 'http://local.grupoeldeber.com/api/v1';
 
 // Debe coincidir con el mismo valor usado en purchaseRequestService.ts.
-const REQUEST_ENTITY = (import.meta as any).env?.VITE_PURCHASE_REQUEST_ENTITY ?? 'CSolicitudCompra';
-const PROFORMA_ENTITY = (import.meta as any).env?.VITE_PROFORMA_ENTITY ?? 'CProforma';
-const PROFORMAS_SUBRESOURCE = (import.meta as any).env?.VITE_PROFORMAS_SUBRESOURCE ?? 'proformas';
-const PROFORMA_LINES_SUBRESOURCE = (import.meta as any).env?.VITE_PROFORMA_LINES_SUBRESOURCE ?? 'lineas';
-
-const API_KEY = '2b4fd11376a17549cba81c63a8840727';
-
-const HEADERS = {
-  'X-Api-Key': API_KEY,
-  'Content-Type': 'application/json',
-};
+const REQUEST_ENTITY = import.meta.env.VITE_PURCHASE_REQUEST_ENTITY ?? 'CSolicitudCompra';
+const PROFORMA_ENTITY = import.meta.env.VITE_PROFORMA_ENTITY ?? 'CProforma';
+const PROFORMAS_SUBRESOURCE = import.meta.env.VITE_PROFORMAS_SUBRESOURCE ?? 'proformas';
+const PROFORMA_LINES_SUBRESOURCE = import.meta.env.VITE_PROFORMA_LINES_SUBRESOURCE ?? 'lineas';
 
 export const DEFAULT_PROFORMA_TAX_RATE_PERCENT = Number(
-  (import.meta as any).env?.VITE_PROFORMA_TAX_RATE ?? 13,
+  import.meta.env.VITE_PROFORMA_TAX_RATE ?? 13,
 );
 
 // Días antes del vencimiento en que una proforma se considera "próxima a vencer".
 export const PROFORMA_EXPIRY_WARNING_DAYS = Number(
-  (import.meta as any).env?.VITE_PROFORMA_EXPIRY_WARNING_DAYS ?? 3,
+  import.meta.env.VITE_PROFORMA_EXPIRY_WARNING_DAYS ?? 3,
 );
 
 const FIELDS = {
@@ -146,51 +140,19 @@ export interface CreateProformaInput {
   lines: ProformaLineInput[];
 }
 
-// --- MANEJO DE ERRORES ------------------------------------------------------
-
-class ApiError extends Error {
-  status: number;
-  reason: string;
-  constructor(status: number, reason: string) {
-    super(reason || `HTTP ${status}`);
-    this.status = status;
-    this.reason = reason;
-  }
-}
+// --- MANEJO DE ERRORES Y FETCH (ver services/espoClient.ts) -----------------
 
 export function getProformaErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.status === 403)
-      return 'Sin permiso sobre las proformas. Revisa el rol del usuario API en EspoCRM.';
-    if (error.reason) return error.reason;
-    return fallback;
-  }
-  if (error instanceof TypeError) {
-    return 'No se pudo conectar con el servidor. Verifica la red o que EspoCRM esté activo.';
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
+  return getEspoErrorMessage(
+    error,
+    fallback,
+    'Sin permiso sobre las proformas. Revisa el rol del usuario API en EspoCRM.',
+  );
 }
 
-async function espoFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${PROFORMAS_API_URL}${path}`, {
-    ...options,
-    headers: { ...HEADERS, ...(options.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const reason = res.headers.get('X-Status-Reason') ?? '';
-    throw new ApiError(res.status, reason);
-  }
-  return res;
-}
+const espoFetch = createEspoFetch(PROFORMAS_API_URL);
 
 // --- CÁLCULOS ----------------------------------------------------------------
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 export function calculateProformaLineSubtotal(quantity: number, unitPrice: number): number {
   return round2((quantity || 0) * (unitPrice || 0));
@@ -218,6 +180,14 @@ export function calculateExpiryDate(issueDate: string, validityDays: number): st
 }
 
 /** Vigencia de una proforma según su fecha de vencimiento, calculada en el cliente. */
+/**
+ * Límite conocido: "hoy" se toma del reloj del navegador, no de un servidor.
+ * La app no tiene backend propio (habla directo con EspoCRM desde el
+ * navegador), así que no hay una fuente de tiempo central contra la cual
+ * comparar. Para usuarios todos en la misma zona horaria (el caso real hoy)
+ * esto es exacto; si algún día se usa desde otro huso horario, la fecha
+ * límite podría verse corrida un día para esa persona.
+ */
 export function getProformaValidity(
   expiryDate: string,
   warningDays: number = PROFORMA_EXPIRY_WARNING_DAYS,
@@ -405,12 +375,10 @@ export async function getProformas(requestId: string): Promise<Proforma[]> {
   const res = await espoFetch(`/${REQUEST_ENTITY}/${requestId}/${PROFORMAS_SUBRESOURCE}`);
   const data = await res.json();
   const rawList = Array.isArray(data) ? data : (data.list ?? []);
-  const proformas: Proforma[] = [];
-  for (const raw of rawList) {
-    const lines = await getProformaLines(raw.id);
-    proformas.push(mapProforma(raw, lines));
-  }
-  return proformas;
+  // Las líneas de cada proforma se piden en paralelo (antes era un for..of
+  // secuencial: N proformas = N round-trips uno detrás del otro).
+  const linesByProforma = await Promise.all(rawList.map((raw: any) => getProformaLines(raw.id)));
+  return rawList.map((raw: any, i: number) => mapProforma(raw, linesByProforma[i]));
 }
 
 export async function getProforma(requestId: string, proformaId: string): Promise<Proforma | null> {

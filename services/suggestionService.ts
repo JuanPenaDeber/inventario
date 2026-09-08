@@ -12,18 +12,12 @@
 // =============================================================================
 
 import { ProductSuggestion } from '../types';
+import { getEspoErrorMessage, createEspoFetch } from './espoClient';
 
 export const SUGGESTIONS_API_URL =
-  (import.meta as any).env?.VITE_SUGGESTIONS_API_URL ?? 'http://local.grupoeldeber.com/api/v1';
+  import.meta.env.VITE_SUGGESTIONS_API_URL ?? 'http://local.grupoeldeber.com/api/v1';
 
-const ENTITY = (import.meta as any).env?.VITE_SUGGESTION_ENTITY ?? 'CSugerenciaProducto';
-
-const API_KEY = '2b4fd11376a17549cba81c63a8840727';
-
-const HEADERS = {
-  'X-Api-Key': API_KEY,
-  'Content-Type': 'application/json',
-};
+const ENTITY = import.meta.env.VITE_SUGGESTION_ENTITY ?? 'CSugerenciaProducto';
 
 const FIELDS = {
   AREA: 'area',
@@ -31,40 +25,15 @@ const FIELDS = {
   PRODUCT: 'producto',
 } as const;
 
-class ApiError extends Error {
-  status: number;
-  reason: string;
-  constructor(status: number, reason: string) {
-    super(reason || `HTTP ${status}`);
-    this.status = status;
-    this.reason = reason;
-  }
-}
-
 export function getSuggestionErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.status === 403) return 'Sin permiso sobre las sugerencias. Revisa el rol del usuario API en EspoCRM.';
-    if (error.reason) return error.reason;
-    return fallback;
-  }
-  if (error instanceof TypeError) {
-    return 'No se pudo conectar con el servidor. Verifica la red o que EspoCRM esté activo.';
-  }
-  if (error instanceof Error && error.message) return error.message;
-  return fallback;
+  return getEspoErrorMessage(
+    error,
+    fallback,
+    'Sin permiso sobre las sugerencias. Revisa el rol del usuario API en EspoCRM.',
+  );
 }
 
-async function espoFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${SUGGESTIONS_API_URL}${path}`, {
-    ...options,
-    headers: { ...HEADERS, ...(options.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const reason = res.headers.get('X-Status-Reason') ?? '';
-    throw new ApiError(res.status, reason);
-  }
-  return res;
-}
+const espoFetch = createEspoFetch(SUGGESTIONS_API_URL);
 
 function mapSuggestion(raw: any): ProductSuggestion {
   return {

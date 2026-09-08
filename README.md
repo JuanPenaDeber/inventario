@@ -12,12 +12,90 @@ View your app in AI Studio: https://ai.studio/apps/drive/1Y39sUeTTlDqBdUuc40m35J
 
 **Prerequisites:**  Node.js
 
-
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Run the app:
    `npm run dev`
+
+Las URLs/entidades de EspoCRM tienen valores por defecto embebidos en cada
+`services/*.ts`; solo hace falta un `.env` si necesitas sobreescribir alguno
+(ver [.env](.env) para la lista completa, todos comentados).
+
+Otros scripts:
+- `npm run typecheck` — corre `tsc --noEmit` (TypeScript en modo `strict`).
+- `npm run build` — build de producción con Vite (con code-splitting por vista).
+
+## Arquitectura: qué es esto y qué límites tiene
+
+**El navegador habla directo con EspoCRM.** No hay backend propio: cada
+`services/*.ts` llama a la API REST de EspoCRM desde el código que corre en
+el navegador de quien use la app. Es lo que permite que todo el proyecto sea
+`npm run build` + copiar `dist/` a cualquier hosting estático, sin servidor
+que mantener. La contrapartida:
+
+> ⚠️ **La API key de EspoCRM viaja en el bundle del navegador.** Cualquiera
+> con acceso a las devtools de un navegador que cargó la app puede extraer la
+> key y usarla directamente contra tu EspoCRM, con los mismos permisos que
+> tiene la app (crear/editar/borrar equipos, préstamos, órdenes de compra,
+> etc.). Esto es un **riesgo aceptado a propósito** mientras la app viva en
+> una red interna de confianza — es la decisión correcta para el tamaño y
+> contexto actual del proyecto, no un descuido. Si algún día esta app se
+> expone a internet abierto (fuera de la red de la empresa) o maneja datos
+> más sensibles, la corrección real es introducir un backend/proxy delgado
+> que guarde la key del lado del servidor y el frontend le hable a él en vez
+> de a EspoCRM directamente — eso es un cambio de arquitectura (deja de ser
+> "100% estático"), no un parche de código.
+
+**Dos filosofías de manejo de errores conviven, a propósito:**
+[services/inventoryService.ts](services/inventoryService.ts) (Inventario,
+Préstamos, Asignaciones, Proveedores, Empleados) absorbe los fallos de red y
+devuelve datos de respaldo en vez de mostrar un error — es el módulo de uso
+diario más frecuente, y una caída momentánea de EspoCRM no debería dejar a
+alguien sin poder ver el inventario. Los servicios de Compras
+(`purchaseOrderService.ts`, `purchaseRequestService.ts`, `proformaService.ts`,
+`suggestionService.ts`) y `incidentsService.ts` hacen lo opuesto: lanzan el
+error y lo muestran explícitamente, porque ahí ocultar un fallo es peor (una
+aprobación u orden de compra que "parece" guardada pero no llegó a EspoCRM es
+un problema serio). Ver la nota al inicio de `inventoryService.ts` para el
+detalle.
+
+**Sin autenticación real en ningún módulo** (el único "candado" que existe es
+la contraseña única de Incidencias, guardada en `sessionStorage` — se salta
+con las devtools). Es una limitación conocida, no resuelta en esta pasada.
+
+**TypeScript corre en modo `strict`** (`tsconfig.json`). Nota para quien siga
+tocando el proyecto: `@types/react`/`@types/react-dom` no estaban instalados
+antes — sin ellos, TypeScript no podía chequear nada relacionado a
+componentes/hooks (todo caía en `any` implícito). Ya están agregados como
+`devDependencies`; si algún día se actualiza React, hay que actualizarlos
+junto con `react`/`react-dom`.
+
+**Ruteo por hash de URL** (`App.tsx`, sin dependencias nuevas): cada vista
+principal se refleja en `location.hash` (ej. `#PURCHASE_ORDERS`), así que se
+puede recargar la página, compartir un enlace, o usar el botón atrás del
+navegador sin perder la vista actual. Las pantallas de alta/edición de
+inventario (`ADD_ITEM`/`EDIT_ITEM`) quedan fuera a propósito: dependen de un
+ítem completo en memoria, no de algo serializable a una URL.
+
+**Cada vista carga su propio código bajo demanda** (`React.lazy` +
+`Suspense` en `App.tsx`) — antes todos los módulos (Compras incluido, el más
+pesado) iban en un único bundle inicial de ~735 KB aunque el usuario solo
+fuera a ver el Dashboard de inventario. El bundle inicial ahora es de ~224 KB;
+el resto se descarga solo cuando se visita cada módulo.
+
+**Red de seguridad ante errores de render**: [components/ErrorBoundary.tsx](components/ErrorBoundary.tsx)
+envuelve toda la app (`index.tsx`). Antes, un error no controlado en
+cualquier componente dejaba la pantalla completamente en blanco sin aviso;
+ahora se muestra una pantalla de error con opción de recargar.
+
+**Código retirado**: `services/geminiService.ts` y la dependencia
+`@google/genai` no se usaban en ningún lado — eran un sobrante de la
+plantilla original ("AI Studio") que nunca se conectó a la app. El botón de
+"escanear código de barras" en `CameraModal.tsx` **sigue siendo una
+simulación** (genera un código aleatorio, no lee un código de barras real) —
+no se tocó porque sí está en uso desde `InventoryForm.tsx`, pero queda
+pendiente decidir si se reemplaza por una librería real de escaneo o se
+retira.
 
 ## Módulo: Solicitudes de Compra (flujo completo, Fases 1 a 4)
 
@@ -70,6 +148,20 @@ Vive en:
   solicitud lleva directo a Órdenes de Compra con la referencia ya buscada;
   el Dashboard lista las proformas próximas a vencer/vencidas con un enlace
   directo a su solicitud.
+- **[services/espoClient.ts](services/espoClient.ts)**: cliente HTTP compartido por los 4
+  servicios nuevos (antes cada uno repetía casi igual su propia clase de
+  error, su `espoFetch` y la API key). Ahora, además, **todas las peticiones
+  tienen timeout** (10s) — antes una petición colgada dejaba el spinner
+  girando para siempre en vez de mostrar un error. `inventoryService.ts` e
+  `incidentsService.ts` no se tocaron: son código previo, con su propio
+  patrón ya establecido.
+- **Anular proforma con panel propio**: reemplacé el `window.prompt()` inicial
+  por un panel inline con textarea, consistente con el resto de decisiones
+  del flujo (Aprobar/Rechazar/Seleccionar).
+- Documenté como limitación conocida (no como bug con arreglo pendiente) que
+  `getProformaValidity` calcula "hoy" con el reloj del navegador — correcto
+  mientras todos los usuarios estén en la misma zona horaria, que es el caso
+  real hoy; no hay una fuente de tiempo central posible sin backend propio.
 
 ### Sobre roles y "quién hizo la acción"
 
