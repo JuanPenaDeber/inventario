@@ -150,6 +150,26 @@ describe('PurchaseOrderManager', () => {
     await waitFor(() => expect(onConsume).toHaveBeenCalled());
   });
 
+  it('la orden imprimible lleva la referencia, las líneas y las dos firmas', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<PurchaseOrderManager />);
+
+    await user.click(await screen.findByText('OC-2025-001'));
+    await tablaDeLineas();
+
+    const hoja = container.querySelector('.print-area') as HTMLElement;
+    expect(within(hoja).getByRole('heading', { name: 'Orden de Compra' })).toBeTruthy();
+    expect(within(hoja).getByText('Ref: OC-2025-001')).toBeTruthy();
+    expect(within(hoja).getByText('Monitor 24 pulgadas')).toBeTruthy();
+
+    // "Solicitante" y "Proveedor" salen dos veces en la hoja: como etiqueta de
+    // la rejilla de datos y como rol al pie. El pie es el que importa aquí.
+    const firmas = hoja.querySelector('.pt-12') as HTMLElement;
+    expect(within(firmas).getByText('Solicitante')).toBeTruthy();
+    expect(within(firmas).getByText('Proveedor')).toBeTruthy();
+    expect(within(firmas).getByText('Importadora Central')).toBeTruthy();
+  });
+
   it('un fallo de carga muestra el aviso y no deja la pantalla cargando', async () => {
     mocks.getPurchaseOrders.mockRejectedValue(new Error('red caída'));
 

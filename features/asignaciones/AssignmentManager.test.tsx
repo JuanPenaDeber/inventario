@@ -142,6 +142,25 @@ describe('AssignmentManager', () => {
     expect(screen.getByText('Notebook Dell Latitude')).toBeTruthy();
   });
 
+  it('el acta imprimible lleva los datos y las dos firmas', async () => {
+    const user = userEvent.setup();
+    mocks.getAssignmentItems.mockResolvedValue([
+      makeItem({ name: 'Cámara Canon R6', serie: 'CAM-99', assignedEmployeeId: 'emp-ana' }),
+    ]);
+
+    const { container } = render(<AssignmentManager />);
+    await user.click(await screen.findByText('Ana Rojas'));
+    await tablaDeDetalle();
+
+    const hoja = container.querySelector('.print-area') as HTMLElement;
+    expect(within(hoja).getByRole('heading', { name: 'Acta de Asignación' })).toBeTruthy();
+    expect(within(hoja).getByText('Cámara Canon R6')).toBeTruthy();
+    expect(within(hoja).getByText('Recibí conforme')).toBeTruthy();
+    expect(within(hoja).getByText('Entregué conforme')).toBeTruthy();
+    // La numeración de filas la pone la tabla, no el módulo.
+    expect(within(hoja).getByText('1')).toBeTruthy();
+  });
+
   it('un fallo de carga no deja la pantalla colgada en "Cargando"', async () => {
     mocks.getAssignments.mockRejectedValue(new Error('red caída'));
 

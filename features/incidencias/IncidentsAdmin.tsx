@@ -4,8 +4,6 @@ import {
   Download,
   RotateCcw,
   Pencil,
-  ChevronLeft,
-  ChevronRight,
   X,
   CheckCircle2,
 } from 'lucide-react';
@@ -25,6 +23,8 @@ import {
 } from '@/features/incidencias/incidentsService';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { today, daysAgo, isWithinDateRange, formatDateTime } from '@/shared/utils/reportUtils';
+import { usePagination } from '@/shared/hooks/usePagination';
+import TablePagination from '@/shared/components/TablePagination';
 
 interface DashboardFilters {
   startDate: string;
@@ -335,22 +335,11 @@ interface IncidentsTableProps {
 const ROWS_OPTIONS = [10, 25, 50];
 
 function IncidentsTable({ incidents, onEdit }: IncidentsTableProps) {
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-
-  // Si cambia el filtrado y la página queda fuera de rango, volvemos al inicio.
-  useEffect(() => {
-    setPage(0);
-  }, [incidents.length]);
-
-  const paginated = incidents.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage,
-  );
-
-  const from = incidents.length === 0 ? 0 : page * rowsPerPage + 1;
-  const to = Math.min(incidents.length, (page + 1) * rowsPerPage);
-  const maxPage = Math.max(0, Math.ceil(incidents.length / rowsPerPage) - 1);
+  // Paginación (shared/hooks/usePagination.ts). El hook acota solo la página
+  // fuera de rango, cosa que esta copia no hacía: al reducirse la lista por un
+  // filtro, la tabla quedaba en blanco hasta el siguiente reset.
+  const pagination = usePagination(incidents, ROWS_OPTIONS[0]);
+  const paginated = pagination.pageItems;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -419,45 +408,7 @@ function IncidentsTable({ incidents, onEdit }: IncidentsTableProps) {
         </table>
       </div>
 
-      {/* Paginación */}
-      <div className="flex flex-wrap items-center justify-end gap-4 border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
-        <div className="flex items-center gap-2">
-          <span>Filas por página</span>
-          <select
-            className="rounded-md border border-slate-300 bg-white px-2 py-1"
-            value={rowsPerPage}
-            onChange={(e) => {
-              setRowsPerPage(parseInt(e.target.value, 10));
-              setPage(0);
-            }}
-          >
-            {ROWS_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
-        <span>
-          {from}–{to} de {incidents.length}
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="rounded-md p-1 hover:bg-slate-100 disabled:opacity-40"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <button
-            onClick={() => setPage((p) => Math.min(maxPage, p + 1))}
-            disabled={page >= maxPage}
-            className="rounded-md p-1 hover:bg-slate-100 disabled:opacity-40"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-      </div>
+      <TablePagination pagination={pagination} options={ROWS_OPTIONS} selectId="rows-per-page-incidencias" />
     </div>
   );
 }

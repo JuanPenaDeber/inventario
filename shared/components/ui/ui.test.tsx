@@ -20,7 +20,16 @@ import { join } from 'node:path';
 import { Field, Input, Select, Textarea, ReadOnlyInput, controlClass } from '@/shared/components/ui/Field';
 import { StatusChip } from '@/shared/components/ui/StatusChip';
 import { LoadingState, EmptyState, NoSelection, ErrorBanner } from '@/shared/components/ui/States';
-import { FOCUS_RING, SOLID_BUTTON, SELECTED_ROW, SELECTED_TITLE, ICON_TINT } from '@/shared/components/ui/accents';
+import {
+  FOCUS_RING,
+  SOLID_BUTTON,
+  SELECTED_ROW,
+  SELECTED_TITLE,
+  ICON_TINT,
+  PICKED_CARD,
+  UNPICKED_CARD,
+  PICKED_CHECK,
+} from '@/shared/components/ui/accents';
 
 describe('Field', () => {
   it('asocia la etiqueta con el control', () => {
@@ -172,7 +181,8 @@ describe('estados', () => {
 describe('accents.ts', () => {
   it('todos los mapas cubren los mismos acentos', () => {
     const claves = Object.keys(FOCUS_RING).sort();
-    for (const mapa of [SOLID_BUTTON, SELECTED_ROW, SELECTED_TITLE, ICON_TINT]) {
+    const mapas = [SOLID_BUTTON, SELECTED_ROW, SELECTED_TITLE, ICON_TINT, PICKED_CARD, UNPICKED_CARD, PICKED_CHECK];
+    for (const mapa of mapas) {
       expect(Object.keys(mapa).sort()).toEqual(claves);
     }
   });

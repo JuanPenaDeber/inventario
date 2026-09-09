@@ -94,3 +94,45 @@ export const ICON_TINT: Record<Accent, string> = {
   purple: 'text-purple-500',
   amber: 'text-amber-500',
 };
+
+/** Tarjeta elegida en un selector de varios elementos. */
+export const PICKED_CARD: Record<Accent, string> = {
+  blue: 'bg-blue-50 border-blue-300 ring-1 ring-blue-300',
+  orange: 'bg-orange-50 border-orange-300 ring-1 ring-orange-300',
+  indigo: 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-300',
+  rose: 'bg-rose-50 border-rose-300 ring-1 ring-rose-300',
+  cyan: 'bg-cyan-50 border-cyan-300 ring-1 ring-cyan-300',
+  teal: 'bg-teal-50 border-teal-300 ring-1 ring-teal-300',
+  slate: 'bg-slate-50 border-slate-300 ring-1 ring-slate-300',
+  emerald: 'bg-emerald-50 border-emerald-300 ring-1 ring-emerald-300',
+  purple: 'bg-purple-50 border-purple-300 ring-1 ring-purple-300',
+  amber: 'bg-amber-50 border-amber-300 ring-1 ring-amber-300',
+};
+
+/** Tarjeta no elegida: blanca, y solo insinúa el acento al pasar por encima. */
+export const UNPICKED_CARD: Record<Accent, string> = {
+  blue: 'bg-white border-slate-100 hover:border-blue-200',
+  orange: 'bg-white border-slate-100 hover:border-orange-200',
+  indigo: 'bg-white border-slate-100 hover:border-indigo-200',
+  rose: 'bg-white border-slate-100 hover:border-rose-200',
+  cyan: 'bg-white border-slate-100 hover:border-cyan-200',
+  teal: 'bg-white border-slate-100 hover:border-teal-200',
+  slate: 'bg-white border-slate-100 hover:border-slate-200',
+  emerald: 'bg-white border-slate-100 hover:border-emerald-200',
+  purple: 'bg-white border-slate-100 hover:border-purple-200',
+  amber: 'bg-white border-slate-100 hover:border-amber-200',
+};
+
+/** Casilla marcada dentro de una tarjeta elegida. */
+export const PICKED_CHECK: Record<Accent, string> = {
+  blue: 'bg-blue-500 border-blue-500 text-white',
+  orange: 'bg-orange-500 border-orange-500 text-white',
+  indigo: 'bg-indigo-500 border-indigo-500 text-white',
+  rose: 'bg-rose-500 border-rose-500 text-white',
+  cyan: 'bg-cyan-500 border-cyan-500 text-white',
+  teal: 'bg-teal-500 border-teal-500 text-white',
+  slate: 'bg-slate-500 border-slate-500 text-white',
+  emerald: 'bg-emerald-500 border-emerald-500 text-white',
+  purple: 'bg-purple-500 border-purple-500 text-white',
+  amber: 'bg-amber-500 border-amber-500 text-white',
+};
