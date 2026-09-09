@@ -13,6 +13,7 @@
 
 import { ProductSuggestion } from '@/types';
 import { getEspoErrorMessage, createEspoFetch, createEspoList } from '@/shared/api/espoClient';
+import { createListCache } from '@/shared/api/cache';
 
 export const SUGGESTIONS_API_URL =
   import.meta.env.VITE_SUGGESTIONS_API_URL ?? 'http://local.grupoeldeber.com/api/v1';
@@ -45,38 +46,15 @@ function mapSuggestion(raw: any): ProductSuggestion {
   };
 }
 
-// --- CACHÉ EN MEMORIA (mismo patrón que el resto de servicios) -------------
+// --- CACHÉ EN MEMORIA (shared/api/cache.ts) --------------------------------
 
-const CACHE_TTL_MS = 60_000;
-
-interface CacheEntry {
-  data?: ProductSuggestion[];
-  ts: number;
-  inflight?: Promise<ProductSuggestion[]>;
-}
-
-let cache: CacheEntry | null = null;
+const listCache = createListCache<ProductSuggestion[]>();
 
 export function invalidateSuggestionsCache(): void {
-  cache = null;
+  listCache.invalidate();
 }
 
-async function cachedList(fetcher: () => Promise<ProductSuggestion[]>): Promise<ProductSuggestion[]> {
-  const now = Date.now();
-  if (cache?.data !== undefined && now - cache.ts < CACHE_TTL_MS) return cache.data;
-  if (cache?.inflight) return cache.inflight;
-  const inflight = fetcher()
-    .then((data) => {
-      cache = { data, ts: Date.now() };
-      return data;
-    })
-    .catch((err) => {
-      cache = null;
-      throw err;
-    });
-  cache = { ts: now, inflight, data: cache?.data };
-  return inflight;
-}
+const cachedList = (fetcher: () => Promise<ProductSuggestion[]>) => listCache.get(fetcher);
 
 export async function getProductSuggestions(): Promise<ProductSuggestion[]> {
   return cachedList(async () => {

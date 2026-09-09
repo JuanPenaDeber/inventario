@@ -59,7 +59,8 @@
 // =============================================================================
 
 import { Proforma, ProformaLine, ProformaValidity } from '@/types';
-import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, round2 } from '@/shared/api/espoClient';
+import { getEspoErrorMessage, createEspoFetch, round2 } from '@/shared/api/espoClient';
+import { readChildLines } from '@/shared/api/espoChildLines';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -372,15 +373,13 @@ async function uploadProformaAttachment(
 // --- PROFORMAS ---------------------------------------------------------------
 
 export async function getProformaLines(proformaId: string): Promise<ProformaLine[]> {
-  try {
-    const res = await espoFetch(`/${PROFORMA_ENTITY}/${proformaId}/${PROFORMA_LINES_SUBRESOURCE}`);
-    const data = await res.json();
-    const rawLines = Array.isArray(data) ? data : (data.list ?? []);
-    return rawLines.map(mapLine);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return [];
-    throw err;
-  }
+  return readChildLines<ProformaLine>({
+    espoFetch,
+    parentEntity: PROFORMA_ENTITY,
+    parentId: proformaId,
+    subresource: PROFORMA_LINES_SUBRESOURCE,
+    map: mapLine,
+  });
 }
 
 /** Todas las proformas registradas para una solicitud, con sus líneas. */

@@ -90,6 +90,8 @@ import { PurchaseRequest, PurchaseRequestLine, PurchaseRequestHistoryEntry, Purc
 import { getProformas, getProforma } from '@/features/compras/proformas/proformaService';
 import { createPurchaseOrder } from '@/features/compras/ordenes/purchaseOrderService';
 import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, createEspoList } from '@/shared/api/espoClient';
+import { readChildLines, syncChildLines } from '@/shared/api/espoChildLines';
+import { createListCache } from '@/shared/api/cache';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -384,42 +386,15 @@ function validateLines(lines: { product: string; quantity: number; unit: string 
   }
 }
 
-// --- CACHÉ EN MEMORIA (mismo patrón que inventoryService.ts/purchaseOrderService.ts) ---
+// --- CACHÉ EN MEMORIA (shared/api/cache.ts) --------------------------------
 
-const CACHE_TTL_MS = 60_000; // 60s
-
-interface ListCacheEntry {
-  data?: PurchaseRequest[];
-  ts: number;
-  inflight?: Promise<PurchaseRequest[]>;
-}
-
-let listCache: ListCacheEntry | null = null;
+const listCache = createListCache<PurchaseRequest[]>();
 
 export function invalidatePurchaseRequestsCache(): void {
-  listCache = null;
+  listCache.invalidate();
 }
 
-async function cachedList(fetcher: () => Promise<PurchaseRequest[]>): Promise<PurchaseRequest[]> {
-  const now = Date.now();
-  if (listCache?.data !== undefined && now - listCache.ts < CACHE_TTL_MS) {
-    return listCache.data;
-  }
-  if (listCache?.inflight) {
-    return listCache.inflight;
-  }
-  const inflight = fetcher()
-    .then((data) => {
-      listCache = { data, ts: Date.now() };
-      return data;
-    })
-    .catch((err) => {
-      listCache = null;
-      throw err;
-    });
-  listCache = { ts: now, inflight, data: listCache?.data };
-  return inflight;
-}
+const cachedList = (fetcher: () => Promise<PurchaseRequest[]>) => listCache.get(fetcher);
 
 // --- HISTÓRICO (append-only) -------------------------------------------------
 
@@ -470,15 +445,13 @@ export async function getPurchaseRequests(): Promise<PurchaseRequest[]> {
 }
 
 export async function getPurchaseRequestLines(requestId: string): Promise<PurchaseRequestLine[]> {
-  try {
-    const res = await espoFetch(`/${ENTITY}/${requestId}/${LINES_SUBRESOURCE}`);
-    const data = await res.json();
-    const rawLines = Array.isArray(data) ? data : (data.list ?? []);
-    return rawLines.map(mapLine);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return [];
-    throw err;
-  }
+  return readChildLines<PurchaseRequestLine>({
+    espoFetch,
+    parentEntity: ENTITY,
+    parentId: requestId,
+    subresource: LINES_SUBRESOURCE,
+    map: mapLine,
+  });
 }
 
 /** Trae una solicitud con su detalle de líneas. Devuelve null si no existe (404). */
@@ -543,28 +516,15 @@ export async function createPurchaseRequest(
  * (id presente en ambas). Mismo patrón de diff que purchaseOrderService.ts.
  */
 async function syncPurchaseRequestLines(requestId: string, newLines: PurchaseRequestLine[]): Promise<void> {
-  const current = await getPurchaseRequestLines(requestId);
-  const newIds = new Set(newLines.filter((l) => l.id).map((l) => l.id));
-
-  const toDelete = current.filter((l) => l.id && !newIds.has(l.id));
-  const toUpdate = newLines.filter((l) => l.id);
-  const toCreate = newLines.filter((l) => !l.id);
-
-  for (const line of toDelete) {
-    await espoFetch(`/${LINE_ENTITY}/${line.id}`, { method: 'DELETE' });
-  }
-  for (const line of toUpdate) {
-    await espoFetch(`/${LINE_ENTITY}/${line.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(buildLinePayload(line)),
-    });
-  }
-  for (const line of toCreate) {
-    await espoFetch(`/${LINE_ENTITY}`, {
-      method: 'POST',
-      body: JSON.stringify({ ...buildLinePayload(line), [LINE_PARENT_FIELD]: requestId }),
-    });
-  }
+  await syncChildLines<PurchaseRequestLine>({
+    espoFetch,
+    lineEntity: LINE_ENTITY,
+    parentField: LINE_PARENT_FIELD,
+    parentId: requestId,
+    current: await getPurchaseRequestLines(requestId),
+    next: newLines,
+    buildPayload: buildLinePayload,
+  });
 }
 
 /**

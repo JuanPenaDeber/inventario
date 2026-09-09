@@ -53,6 +53,8 @@
 
 import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus } from '@/types';
 import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, createEspoList, round2 } from '@/shared/api/espoClient';
+import { readChildLines, syncChildLines } from '@/shared/api/espoChildLines';
+import { createListCache } from '@/shared/api/cache';
 import { addInventoryItem, invalidateCache as invalidateInventoryCache } from '@/shared/api/inventoryService';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
@@ -317,43 +319,19 @@ function buildLinePayload(line: {
   };
 }
 
-// --- CACHÉ EN MEMORIA (mismo patrón que inventoryService.ts) ---------------
+// --- CACHÉ EN MEMORIA (shared/api/cache.ts) --------------------------------
+// La implementación estaba copiada aquí, y la copia no traía la protección de
+// generación: una lectura que salía antes de un guardado podía cachearse
+// después de él. La versión compartida sí la trae.
 
-const CACHE_TTL_MS = 60_000; // 60s
-
-interface ListCacheEntry {
-  data?: PurchaseOrder[];
-  ts: number;
-  inflight?: Promise<PurchaseOrder[]>;
-}
-
-let listCache: ListCacheEntry | null = null;
+const listCache = createListCache<PurchaseOrder[]>();
 
 /** Invalida la caché del listado. Se llama tras cualquier mutación. */
 export function invalidatePurchaseOrdersCache(): void {
-  listCache = null;
+  listCache.invalidate();
 }
 
-async function cachedList(fetcher: () => Promise<PurchaseOrder[]>): Promise<PurchaseOrder[]> {
-  const now = Date.now();
-  if (listCache?.data !== undefined && now - listCache.ts < CACHE_TTL_MS) {
-    return listCache.data;
-  }
-  if (listCache?.inflight) {
-    return listCache.inflight;
-  }
-  const inflight = fetcher()
-    .then((data) => {
-      listCache = { data, ts: Date.now() };
-      return data;
-    })
-    .catch((err) => {
-      listCache = null;
-      throw err;
-    });
-  listCache = { ts: now, inflight, data: listCache?.data };
-  return inflight;
-}
+const cachedList = (fetcher: () => Promise<PurchaseOrder[]>) => listCache.get(fetcher);
 
 // --- ÓRDENES DE COMPRA -------------------------------------------------------
 
@@ -367,15 +345,13 @@ export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
 
 /** Líneas de una orden de compra (sub-recurso). */
 export async function getPurchaseOrderLines(orderId: string): Promise<PurchaseOrderLine[]> {
-  try {
-    const res = await espoFetch(`/${ENTITY}/${orderId}/${LINES_SUBRESOURCE}`);
-    const data = await res.json();
-    const rawLines = Array.isArray(data) ? data : (data.list ?? []);
-    return rawLines.map(mapLine);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return [];
-    throw err;
-  }
+  return readChildLines<PurchaseOrderLine>({
+    espoFetch,
+    parentEntity: ENTITY,
+    parentId: orderId,
+    subresource: LINES_SUBRESOURCE,
+    map: mapLine,
+  });
 }
 
 /** Trae una orden con su detalle de líneas. Devuelve null si no existe (404). */
@@ -448,28 +424,15 @@ export async function createPurchaseOrder(input: CreatePurchaseOrderInput): Prom
  * en inventoryService.ts.
  */
 async function syncPurchaseOrderLines(orderId: string, newLines: PurchaseOrderLine[]): Promise<void> {
-  const current = await getPurchaseOrderLines(orderId);
-  const newIds = new Set(newLines.filter((l) => l.id).map((l) => l.id));
-
-  const toDelete = current.filter((l) => l.id && !newIds.has(l.id));
-  const toUpdate = newLines.filter((l) => l.id);
-  const toCreate = newLines.filter((l) => !l.id);
-
-  for (const line of toDelete) {
-    await espoFetch(`/${LINE_ENTITY}/${line.id}`, { method: 'DELETE' });
-  }
-  for (const line of toUpdate) {
-    await espoFetch(`/${LINE_ENTITY}/${line.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(buildLinePayload(line)),
-    });
-  }
-  for (const line of toCreate) {
-    await espoFetch(`/${LINE_ENTITY}`, {
-      method: 'POST',
-      body: JSON.stringify({ ...buildLinePayload(line), [LINE_PARENT_FIELD]: orderId }),
-    });
-  }
+  await syncChildLines<PurchaseOrderLine>({
+    espoFetch,
+    lineEntity: LINE_ENTITY,
+    parentField: LINE_PARENT_FIELD,
+    parentId: orderId,
+    current: await getPurchaseOrderLines(orderId),
+    next: newLines,
+    buildPayload: buildLinePayload,
+  });
 }
 
 /** Actualiza cabecera y, si se envían líneas, las sincroniza (altas/bajas/cambios). */
