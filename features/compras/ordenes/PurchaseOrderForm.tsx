@@ -10,6 +10,7 @@ import {
   INITIAL_STATUSES,
   getSelectableStatuses,
 } from '@/features/compras/ordenes/purchaseOrderService';
+import { controlClass, labelClass } from '@/shared/components/ui/Field';
 
 // Forma unificada que recibe el padre (PurchaseOrderManager) para decidir si
 // crea o actualiza. `id` presente => update; ausente => create.
@@ -48,9 +49,11 @@ const emptyLine = (): LineDraft => ({
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-const inputCls =
-  'w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white';
-const labelCls = 'block text-sm font-medium text-slate-700 mb-1';
+// Clases de campo compartidas (shared/components/ui/Field.tsx). Antes esta
+// cadena vivía escrita a mano aquí y en otros tres archivos, y ya habían
+// divergido entre sí. El acento teal es el del módulo de Órdenes de Compra.
+const inputCls = controlClass('teal');
+const labelCls = labelClass();
 
 const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({ initialData, onSave, onCancel, saving = false }) => {
   const [providers, setProviders] = useState<Provider[]>([]);

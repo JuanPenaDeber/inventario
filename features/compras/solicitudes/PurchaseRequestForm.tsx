@@ -4,6 +4,7 @@ import { PurchaseRequest, PurchaseRequestLine, Employee, ProductSuggestion } fro
 import { getEmployees } from '@/shared/api/inventoryService';
 import { PRIORITIES } from '@/features/compras/solicitudes/purchaseRequestService';
 import { getProductSuggestions, matchSuggestions } from '@/features/compras/sugerencias/suggestionService';
+import { controlClass, labelClass } from '@/shared/components/ui/Field';
 
 // Forma unificada que recibe el padre (PurchaseRequestManager) para decidir
 // si crea o actualiza. `id` presente => update; ausente => create.
@@ -42,9 +43,10 @@ const emptyLine = (): LineDraft => ({
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-const inputCls =
-  'w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 outline-none bg-white';
-const labelCls = 'block text-sm font-medium text-slate-700 mb-1';
+// Clases de campo compartidas (shared/components/ui/Field.tsx).
+// El acento cian es el del módulo de Solicitudes de Compra.
+const inputCls = controlClass('cyan');
+const labelCls = labelClass();
 
 const PurchaseRequestForm: React.FC<PurchaseRequestFormProps> = ({ initialData, onSave, onCancel, saving = false }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);

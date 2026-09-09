@@ -29,6 +29,9 @@ import DateRangeBar from '@/shared/components/DateRangeBar';
 import PurchaseOrderForm, { PurchaseOrderFormValues } from '@/features/compras/ordenes/PurchaseOrderForm';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import MasterDetail from '@/shared/components/MasterDetail';
+import { NoSelection } from '@/shared/components/ui/States';
+import StatusChip from '@/shared/components/ui/StatusChip';
 
 const STATUS_CHIP: Record<PurchaseOrderStatus, string> = {
   BORRADOR: 'text-slate-600 border-slate-300 bg-slate-50',
@@ -501,178 +504,168 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
       </div>
 
       {/* --- MASTER DETAIL --- */}
-      <div className="flex-1 flex flex-col md:flex-row gap-6 bg-white rounded-xl shadow-sm border border-slate-200 no-print">
-
-        {/* Lista (izquierda) */}
-        <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col md:max-h-[calc(100vh-8rem)] md:overflow-y-auto custom-scrollbar">
-          {loading ? (
-            <div className="p-8 text-center text-slate-400">Cargando órdenes...</div>
-          ) : filteredOrders.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">No hay órdenes de compra registradas.</div>
+      <MasterDetail
+        items={filteredOrders}
+        selectedId={selectedOrderId}
+        onSelect={setSelectedOrderId}
+        accent="teal"
+        loading={loading}
+        loadingMessage="Cargando órdenes..."
+        emptyMessage="No hay órdenes de compra registradas."
+        emptyDetail={<NoSelection icon={ShoppingCart} message="Selecciona una orden para ver el detalle" />}
+        renderRow={(order, isSelected) => (
+          <>
+          <div className="flex justify-between items-start mb-1 gap-2">
+            <h3 className={`font-medium text-sm truncate ${isSelected ? 'text-teal-900' : 'text-slate-800'}`}>{order.reference}</h3>
+            <StatusChip status={order.status} tone={STATUS_CHIP[order.status]} />
+          </div>
+          <p className="text-xs text-slate-500 mb-1 truncate">{order.providerName || 'Sin proveedor'}</p>
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>{formatDate(order.requestDate)}</span>
+            <span className="font-medium text-slate-600">{order.currency} {order.total.toFixed(2)}</span>
+          </div>
+          </>
+        )}
+        // Ignora el elemento de la lista a propósito: la lista trae órdenes sin
+        // líneas y el detalle completo llega por separado en `selectedOrder`
+        // (getPurchaseOrder). Mientras ese segundo viaje está en curso se
+        // muestra el mismo marcador que cuando no hay nada seleccionado.
+        renderDetail={() => (
+          !selectedOrder ? (
+            <NoSelection icon={ShoppingCart} message="Selecciona una orden para ver el detalle" />
           ) : (
-            filteredOrders.map((order) => {
-              const isSelected = order.id === selectedOrderId;
-              return (
-                <div
-                  key={order.id}
-                  onClick={() => setSelectedOrderId(order.id)}
-                  className={`p-4 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors ${isSelected ? 'bg-teal-50/60 border-l-4 border-l-teal-500' : 'border-l-4 border-l-transparent'}`}
-                >
-                  <div className="flex justify-between items-start mb-1 gap-2">
-                    <h3 className={`font-medium text-sm truncate ${isSelected ? 'text-teal-900' : 'text-slate-800'}`}>{order.reference}</h3>
-                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-bold border ${STATUS_CHIP[order.status]}`}>{order.status}</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mb-1 truncate">{order.providerName || 'Sin proveedor'}</p>
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>{formatDate(order.requestDate)}</span>
-                    <span className="font-medium text-slate-600">{order.currency} {order.total.toFixed(2)}</span>
-                  </div>
+          <>
+            <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start gap-4">
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-slate-800 truncate">{selectedOrder.reference}</h2>
+                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500 mt-1">
+                  <span className="flex items-center gap-1"><Building2 size={14} /> {selectedOrder.providerName || selectedOrder.providerId}</span>
+                  <span className="flex items-center gap-1"><Calendar size={14} /> {formatDate(selectedOrder.requestDate)}</span>
                 </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Detalle (derecha) */}
-        <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30">
-          {selectedOrder ? (
-            <>
-              <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-slate-800 truncate">{selectedOrder.reference}</h2>
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500 mt-1">
-                    <span className="flex items-center gap-1"><Building2 size={14} /> {selectedOrder.providerName || selectedOrder.providerId}</span>
-                    <span className="flex items-center gap-1"><Calendar size={14} /> {formatDate(selectedOrder.requestDate)}</span>
-                  </div>
-                  <span className={`inline-block mt-2 text-xs px-2 py-0.5 rounded-full font-bold border ${STATUS_CHIP[selectedOrder.status]}`}>{selectedOrder.status}</span>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  {canEdit && (
-                    <button onClick={() => handleEditStart(selectedOrder)} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar">
-                      <Edit size={18} />
-                    </button>
-                  )}
-                  <button onClick={handlePrint} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Imprimir">
-                    <Printer size={18} />
+                <StatusChip status={selectedOrder.status} tone={STATUS_CHIP[selectedOrder.status]} size="md" className="inline-block mt-2" />
+              </div>
+              <div className="flex gap-2 shrink-0">
+                {canEdit && (
+                  <button onClick={() => handleEditStart(selectedOrder)} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar">
+                    <Edit size={18} />
                   </button>
-                  {canCancel && (
-                    <button onClick={() => handleCancelOrder(selectedOrder)} className="p-2 border rounded hover:bg-red-50 text-red-600 border-red-200" title="Cancelar orden">
-                      <Ban size={18} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex-1 p-6">
-                {selectedOrder.notes && (
-                  <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
-                    <span className="font-bold">Observaciones:</span> {selectedOrder.notes}
-                  </div>
                 )}
-
-                <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2"><FileText size={16} /> Detalle de productos</h3>
-
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
-                  {loadingDetail ? (
-                    <div className="p-8 text-center text-slate-400">Cargando detalle...</div>
-                  ) : (
-                    <table className="w-full text-left text-sm min-w-[640px]">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
-                        <tr>
-                          <th className="px-4 py-3">Producto</th>
-                          <th className="px-4 py-3">Categoría</th>
-                          <th className="px-4 py-3 text-right">Solicitado</th>
-                          <th className="px-4 py-3 text-right">Recibido</th>
-                          <th className="px-4 py-3 text-right">Precio unit.</th>
-                          <th className="px-4 py-3 text-right">Subtotal</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {selectedOrder.lines.length === 0 ? (
-                          <tr><td colSpan={6} className="p-4 text-center text-slate-400">Sin productos.</td></tr>
-                        ) : (
-                          selectedOrder.lines.map((line) => (
-                            <tr key={line.id || line.description}>
-                              <td className="px-4 py-3 font-medium">{line.description}</td>
-                              <td className="px-4 py-3 text-slate-500">{line.category}</td>
-                              <td className="px-4 py-3 text-right">{line.quantityRequested}</td>
-                              <td className="px-4 py-3 text-right">
-                                <span className={line.quantityReceived >= line.quantityRequested ? 'text-green-600 font-medium' : 'text-amber-600'}>
-                                  {line.quantityReceived}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-right">{selectedOrder.currency} {line.unitPrice.toFixed(2)}</td>
-                              <td className="px-4 py-3 text-right font-medium">{selectedOrder.currency} {line.subtotal.toFixed(2)}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-
-                <div className="mt-4 flex justify-end">
-                  <div className="w-full max-w-xs space-y-1 text-sm">
-                    <div className="flex justify-between text-slate-600">
-                      <span>Subtotal</span><span>{selectedOrder.currency} {selectedOrder.subtotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>Impuesto ({selectedOrder.taxRate}%)</span><span>{selectedOrder.currency} {selectedOrder.taxAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-base font-bold text-slate-900 border-t border-slate-200 pt-1">
-                      <span>Total</span><span>{selectedOrder.currency} {selectedOrder.total.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Recepción (total o parcial). No crea equipos automáticamente. */}
-                {canReceive && (
-                  <div className="mt-8 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                      <PackageCheck size={16} /> Registrar recepción
-                    </h3>
-                    <p className="text-xs text-slate-500 mb-3">
-                      Indica la cantidad total recibida por producto (permite recepción parcial). Esto no crea equipos en el inventario automáticamente.
-                    </p>
-                    <div className="space-y-2">
-                      {selectedOrder.lines.map((line) => (
-                        <div key={line.id} className="flex items-center justify-between gap-3 text-sm">
-                          <span className="flex-1 truncate">{line.description}</span>
-                          <span className="text-xs text-slate-400 whitespace-nowrap">de {line.quantityRequested}</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={line.quantityRequested}
-                            value={receivedQuantities[line.id] ?? line.quantityReceived}
-                            onChange={(e) =>
-                              setReceivedQuantities((prev) => ({ ...prev, [line.id]: Number(e.target.value) }))
-                            }
-                            className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-right focus:ring-2 focus:ring-teal-500 outline-none"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 flex justify-end">
-                      <button
-                        onClick={handleReceive}
-                        disabled={receiving}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white rounded-lg font-medium transition-colors"
-                      >
-                        {receiving ? 'Guardando...' : 'Registrar recepción'}
-                      </button>
-                    </div>
-                  </div>
+                <button onClick={handlePrint} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Imprimir">
+                  <Printer size={18} />
+                </button>
+                {canCancel && (
+                  <button onClick={() => handleCancelOrder(selectedOrder)} className="p-2 border rounded hover:bg-red-50 text-red-600 border-red-200" title="Cancelar orden">
+                    <Ban size={18} />
+                  </button>
                 )}
               </div>
-            </>
-          ) : (
-            <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center text-slate-400">
-              <ShoppingCart size={48} className="opacity-20 mb-4" />
-              <p>Selecciona una orden para ver el detalle</p>
             </div>
-          )}
-        </div>
-      </div>
+
+            <div className="flex-1 p-6">
+              {selectedOrder.notes && (
+                <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
+                  <span className="font-bold">Observaciones:</span> {selectedOrder.notes}
+                </div>
+              )}
+
+              <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2"><FileText size={16} /> Detalle de productos</h3>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
+                {loadingDetail ? (
+                  <div className="p-8 text-center text-slate-400">Cargando detalle...</div>
+                ) : (
+                  <table className="w-full text-left text-sm min-w-[640px]">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Producto</th>
+                        <th className="px-4 py-3">Categoría</th>
+                        <th className="px-4 py-3 text-right">Solicitado</th>
+                        <th className="px-4 py-3 text-right">Recibido</th>
+                        <th className="px-4 py-3 text-right">Precio unit.</th>
+                        <th className="px-4 py-3 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedOrder.lines.length === 0 ? (
+                        <tr><td colSpan={6} className="p-4 text-center text-slate-400">Sin productos.</td></tr>
+                      ) : (
+                        selectedOrder.lines.map((line) => (
+                          <tr key={line.id || line.description}>
+                            <td className="px-4 py-3 font-medium">{line.description}</td>
+                            <td className="px-4 py-3 text-slate-500">{line.category}</td>
+                            <td className="px-4 py-3 text-right">{line.quantityRequested}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={line.quantityReceived >= line.quantityRequested ? 'text-green-600 font-medium' : 'text-amber-600'}>
+                                {line.quantityReceived}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">{selectedOrder.currency} {line.unitPrice.toFixed(2)}</td>
+                            <td className="px-4 py-3 text-right font-medium">{selectedOrder.currency} {line.subtotal.toFixed(2)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <div className="w-full max-w-xs space-y-1 text-sm">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Subtotal</span><span>{selectedOrder.currency} {selectedOrder.subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Impuesto ({selectedOrder.taxRate}%)</span><span>{selectedOrder.currency} {selectedOrder.taxAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-bold text-slate-900 border-t border-slate-200 pt-1">
+                    <span>Total</span><span>{selectedOrder.currency} {selectedOrder.total.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recepción (total o parcial). No crea equipos automáticamente. */}
+              {canReceive && (
+                <div className="mt-8 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                  <h3 className="text-sm font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                    <PackageCheck size={16} /> Registrar recepción
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Indica la cantidad total recibida por producto (permite recepción parcial). Esto no crea equipos en el inventario automáticamente.
+                  </p>
+                  <div className="space-y-2">
+                    {selectedOrder.lines.map((line) => (
+                      <div key={line.id} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="flex-1 truncate">{line.description}</span>
+                        <span className="text-xs text-slate-400 whitespace-nowrap">de {line.quantityRequested}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={line.quantityRequested}
+                          value={receivedQuantities[line.id] ?? line.quantityReceived}
+                          onChange={(e) =>
+                            setReceivedQuantities((prev) => ({ ...prev, [line.id]: Number(e.target.value) }))
+                          }
+                          className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-right focus:ring-2 focus:ring-teal-500 outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={handleReceive}
+                      disabled={receiving}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white rounded-lg font-medium transition-colors"
+                    >
+                      {receiving ? 'Guardando...' : 'Registrar recepción'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+          )
+        )}
+      />
 
       <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} />
     </div>

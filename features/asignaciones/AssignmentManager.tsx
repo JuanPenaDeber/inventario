@@ -30,6 +30,13 @@ import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '@/shar
 import { getLogoUrl, getPhotoUrl } from '@/shared/api/photoServer';
 import DateRangeBar from '@/shared/components/DateRangeBar';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import { controlClass } from '@/shared/components/ui/Field';
+import MasterDetail from '@/shared/components/MasterDetail';
+import { NoSelection } from '@/shared/components/ui/States';
+
+// Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
+// indigo es el de este módulo.
+const inputCls = controlClass('indigo');
 
 const AssignmentManager: React.FC = () => {
     const [viewMode, setViewMode] = useState<'dashboard' | 'form'>('dashboard');
@@ -419,7 +426,7 @@ const AssignmentManager: React.FC = () => {
                             <form onSubmit={handleSubmit} className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Referencia</label>
-                                    <input required type="text" value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white" placeholder="Referencia" />
+                                    <input required type="text" value={name} onChange={e => setName(e.target.value)} className={inputCls} placeholder="Referencia" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Asignado a</label>
@@ -428,7 +435,7 @@ const AssignmentManager: React.FC = () => {
                                             required
                                             value={employeeId}
                                             onChange={handleEmployeeChange}
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                            className={inputCls}
                                         >
                                             <option value="">Seleccionar...</option>
                                             {employees.map(e => (
@@ -443,7 +450,7 @@ const AssignmentManager: React.FC = () => {
                                         type="text"
                                         value={equipo}
                                         onChange={e => setEquipo(e.target.value)}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        className={inputCls}
                                     />
                                 </div>
                                 <div>
@@ -452,7 +459,7 @@ const AssignmentManager: React.FC = () => {
                                         required
                                         value={authorizerId}
                                         onChange={handleAuthorizerChange}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        className={inputCls}
                                     >
                                         <option value="">Seleccionar Autorizador</option>
                                         {employees.map(e => (
@@ -466,11 +473,11 @@ const AssignmentManager: React.FC = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Descripción</label>
-                                    <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" rows={3} placeholder="Notas adicionales..." />
+                                    <textarea value={description} onChange={e => setDescription(e.target.value)} className={inputCls} rows={3} placeholder="Notas adicionales..." />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Observaciones</label>
-                                    <textarea value={observacion} onChange={e => setObservacion(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" rows={3} placeholder="Notas adicionales..." />
+                                    <textarea value={observacion} onChange={e => setObservacion(e.target.value)} className={inputCls} rows={3} placeholder="Notas adicionales..." />
                                 </div>
 
                                 <div className="pt-4 border-t border-slate-100 mt-4">
@@ -533,110 +540,99 @@ const AssignmentManager: React.FC = () => {
                 />
 
                 {/* DASHBOARD */}
-                <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200 no-print">
-                    <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col">
-                        <div className="p-4 border-b border-slate-100">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                                <input type="text" placeholder="Buscar empleado..." value={assignmentSearch} onChange={e => setAssignmentSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <MasterDetail
+                    items={filteredAssignments}
+                    selectedId={selectedAssignmentId}
+                    onSelect={setSelectedAssignmentId}
+                    accent="indigo"
+                    loading={loading}
+                    loadingMessage="Cargando..."
+                    emptyMessage="No hay asignaciones."
+                    search={assignmentSearch}
+                    onSearchChange={setAssignmentSearch}
+                    searchPlaceholder="Buscar empleado..."
+                    emptyDetail={<NoSelection icon={FileBadge} message="Seleccione una asignación" />}
+                    renderRow={(a) => (
+                        <>
+                            <h3 className="font-medium text-sm text-slate-800">{a.employeeName}</h3>
+                            <p className="text-xs text-slate-500">{a.equipo}</p>
+                            <div className="flex justify-between mt-2 text-xs text-slate-400">
+                                <span>{new Date(a.fecha).toLocaleDateString()}</span>
+                            </div>
+                        </>
+                    )}
+                    renderDetail={(selectedAssignment) => (
+                        <>
+                        <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800">{selectedAssignment.employeeName}</h2>
+                                <div className="flex items-center gap-4 text-sm text-slate-500 mt-1">
+                                    <span className="flex items-center gap-1"><Building2 size={14} /> {selectedAssignment.equipo}</span>
+                                    <span className="flex items-center gap-1"><Calendar size={14} /> {new Date(selectedAssignment.fecha).toLocaleDateString()}</span>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={handleEditStart} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar Asignación">
+                                    <Edit size={18} />
+                                </button>
+                                <button onClick={handlePrint} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Imprimir Acta">
+                                    <Printer size={18} />
+                                </button>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar">
-                            {loading ? (
-                                <div className="p-8 text-center text-slate-400">Cargando...</div>
-                            ) : filteredAssignments.length === 0 ? (
-                                <div className="p-8 text-center text-slate-400">No hay asignaciones.</div>
-                            ) : filteredAssignments.map(a => (
-                                <div key={a.id} onClick={() => setSelectedAssignmentId(a.id)} className={`p-4 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors ${a.id === selectedAssignmentId ? 'bg-indigo-50/60 border-l-4 border-l-indigo-500' : 'border-l-4 border-l-transparent'}`}>
-                                    <h3 className="font-medium text-sm text-slate-800">{a.employeeName}</h3>
-                                    <p className="text-xs text-slate-500">{a.equipo}</p>
-                                    <div className="flex justify-between mt-2 text-xs text-slate-400">
-                                        {/* <span>{(a.itemIds)?a.itemIds.length:"0"} Equipos</span> */}
-                                        <span>{new Date(a.fecha).toLocaleDateString()}</span>
-                                    </div>
+                        <div className="flex-1 overflow-y-auto p-6">
+                            {selectedAssignment.description && (
+                                <div className="mb-6 p-3 ">
+                                    <span className="font-bold">Descripción:</span> {selectedAssignment.description}
                                 </div>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30">
-                        {selectedAssignment ? (
-                            <>
-                                <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start">
-                                    <div>
-                                        <h2 className="text-xl font-bold text-slate-800">{selectedAssignment.employeeName}</h2>
-                                        <div className="flex items-center gap-4 text-sm text-slate-500 mt-1">
-                                            <span className="flex items-center gap-1"><Building2 size={14} /> {selectedAssignment.equipo}</span>
-                                            <span className="flex items-center gap-1"><Calendar size={14} /> {new Date(selectedAssignment.fecha).toLocaleDateString()}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button onClick={handleEditStart} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar Asignación">
-                                            <Edit size={18} />
-                                        </button>
-                                        <button onClick={handlePrint} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Imprimir Acta">
-                                            <Printer size={18} />
-                                        </button>
-                                    </div>
+                            )}
+                            {selectedAssignment.observacion && (
+                                <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
+                                    <span className="font-bold">Observaciones:</span> {selectedAssignment.observacion}
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-6">
-                                    {selectedAssignment.description && (
-                                        <div className="mb-6 p-3 ">
-                                            <span className="font-bold">Descripción:</span> {selectedAssignment.description}
-                                        </div>
-                                    )}
-                                    {selectedAssignment.observacion && (
-                                        <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
-                                            <span className="font-bold">Observaciones:</span> {selectedAssignment.observacion}
-                                        </div>
-                                    )}
-                                    <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">Equipos en Custodia</h3>
-                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                                        {loadingItems ? (
-                                            <div className="p-4 text-center text-slate-400">Cargando equipos...</div>
-                                        ) : (
-                                            <table className="w-full text-left text-sm">
-                                                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
-                                                    <tr>
-                                                        <th className="px-4 py-3">Equipo</th>
-                                                        <th className="px-4 py-3">Categoría</th>
-                                                        <th className="px-4 py-3">Serial</th>
-                                                        <th className="px-4 py-3">Estado Actual</th>
+                            )}
+                            <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">Equipos en Custodia</h3>
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                {loadingItems ? (
+                                    <div className="p-4 text-center text-slate-400">Cargando equipos...</div>
+                                ) : (
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                                            <tr>
+                                                <th className="px-4 py-3">Equipo</th>
+                                                <th className="px-4 py-3">Categoría</th>
+                                                <th className="px-4 py-3">Serial</th>
+                                                <th className="px-4 py-3">Estado Actual</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {currentAssignmentItems.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={4} className="px-4 py-3 text-center text-slate-400 italic">No hay equipos asociados.</td>
+                                                </tr>
+                                            ) : (
+                                                currentAssignmentItems.map(i => (
+                                                    <tr key={i.id}>
+                                                        <td className="px-4 py-3 font-medium">{i.name}</td>
+                                                        <td className="px-4 py-3">{i.category}</td>
+                                                        <td className="px-4 py-3 font-mono text-slate-500">{i.serie}</td>
+                                                        <td className="px-4 py-3">
+                                                            {i.assignedEmployeeId === selectedAssignment.employeeId ?
+                                                                <span className="text-green-600 font-bold text-xs bg-green-50 px-2 py-0.5 rounded">Vigente</span> :
+                                                                <span className="text-slate-400 text-xs italic">Reasignado a {i.assignedEmployeeName || 'Nadie'}</span>
+                                                            }
+                                                        </td>
                                                     </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {currentAssignmentItems.length === 0 ? (
-                                                        <tr>
-                                                            <td colSpan={4} className="px-4 py-3 text-center text-slate-400 italic">No hay equipos asociados.</td>
-                                                        </tr>
-                                                    ) : (
-                                                        currentAssignmentItems.map(i => (
-                                                            <tr key={i.id}>
-                                                                <td className="px-4 py-3 font-medium">{i.name}</td>
-                                                                <td className="px-4 py-3">{i.category}</td>
-                                                                <td className="px-4 py-3 font-mono text-slate-500">{i.serie}</td>
-                                                                <td className="px-4 py-3">
-                                                                    {i.assignedEmployeeId === selectedAssignment.employeeId ?
-                                                                        <span className="text-green-600 font-bold text-xs bg-green-50 px-2 py-0.5 rounded">Vigente</span> :
-                                                                        <span className="text-slate-400 text-xs italic">Reasignado a {i.assignedEmployeeName || 'Nadie'}</span>
-                                                                    }
-                                                                </td>
-                                                            </tr>
-                                                        ))
-                                                    )}
-                                                </tbody>
-                                            </table>
-                                        )}
-                                    </div>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                                <FileBadge size={48} className="opacity-20 mb-4" />
-                                <p>Seleccione una asignación</p>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                )}
                             </div>
-                        )}
-                    </div>
-                </div>
+                        </div>
+                        </>
+                    )}
+                />
                 </>
             )}
 

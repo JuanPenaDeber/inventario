@@ -16,10 +16,14 @@ export default defineConfig(() => {
         }
       },
       test: {
-        // jsdom solo hace falta para el test del hook; el resto son funciones puras.
+        // jsdom hace falta para los tests de hooks y de componentes; el resto
+        // son funciones puras y no lo usan.
         environment: 'jsdom',
         include: ['**/*.test.ts', '**/*.test.tsx'],
         exclude: ['node_modules/**', 'dist/**'],
+        // Desmonta el árbol entre tests y rellena lo que jsdom no trae.
+        // Sin esto, dos tests que renderizan lo mismo chocan entre sí.
+        setupFiles: ['./shared/test/setup.ts'],
       },
     };
 });

@@ -28,5 +28,13 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // Los scripts de `scripts/` no corren en el navegador sino con node, así
+    // que `console`, `process` y compañía sí existen ahí.
+    files: ['scripts/**/*.mjs', '*.config.js', '*.config.ts'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', __dirname: 'readonly' },
+    },
+  },
   eslintConfigPrettier,
 );

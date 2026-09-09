@@ -9,6 +9,7 @@ import {
 } from '@/features/compras/sugerencias/suggestionService';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import { controlClass } from '@/shared/components/ui/Field';
 
 /**
  * Configuración de sugerencias de productos por área y cargo (Fase 4,
@@ -16,6 +17,10 @@ import { useAsyncData } from '@/shared/hooks/useAsyncData';
  * real, igual que "Gestionar proveedores": cualquiera con acceso a Ajustes
  * puede entrar aquí (ver README.md).
  */
+// Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
+// amber es el de este módulo.
+const inputCls = controlClass('amber') + ' mt-1';
+
 const SuggestionManager: React.FC = () => {
   const {
     data: suggestions,
@@ -92,15 +97,15 @@ const SuggestionManager: React.FC = () => {
             <form onSubmit={handleAdd} className="space-y-4">
               <div>
                 <label className="text-xs font-medium text-slate-500 uppercase">Área</label>
-                <input type="text" required value={area} onChange={(e) => setArea(e.target.value)} placeholder="Ej: Sistemas" className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                <input type="text" required value={area} onChange={(e) => setArea(e.target.value)} placeholder="Ej: Sistemas" className={inputCls} />
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 uppercase">Cargo</label>
-                <input type="text" required value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Ej: Desarrollador" className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                <input type="text" required value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Ej: Desarrollador" className={inputCls} />
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 uppercase">Producto sugerido</label>
-                <input type="text" required value={product} onChange={(e) => setProduct(e.target.value)} placeholder="Ej: Laptop" className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                <input type="text" required value={product} onChange={(e) => setProduct(e.target.value)} placeholder="Ej: Laptop" className={inputCls} />
               </div>
               <button disabled={saving} className="w-full bg-amber-600 disabled:bg-amber-300 text-white py-2 rounded-lg hover:bg-amber-700 flex items-center justify-center gap-2 font-medium">
                 <Plus size={18} /> {saving ? 'Guardando...' : 'Agregar sugerencia'}

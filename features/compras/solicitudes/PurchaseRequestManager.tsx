@@ -43,7 +43,11 @@ import PurchaseRequestForm, { PurchaseRequestFormValues } from '@/features/compr
 import ProformaPanel from '@/features/compras/proformas/ProformaPanel';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import MasterDetail from '@/shared/components/MasterDetail';
+import { NoSelection } from '@/shared/components/ui/States';
 import type { PurchaseRequestHistoryEntry } from '@/types';
+import StatusChip from '@/shared/components/ui/StatusChip';
+import { controlClass } from '@/shared/components/ui/Field';
 
 const STATUS_CHIP: Record<PurchaseRequestStatus, string> = {
   BORRADOR: 'text-slate-600 border-slate-300 bg-slate-50',
@@ -103,6 +107,10 @@ interface PurchaseRequestManagerProps {
   /** Navega al módulo de Órdenes de Compra ya buscando la referencia dada (ver ProformaPanel). */
   onNavigateToOrder?: (reference: string) => void;
 }
+
+// Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
+// cyan es el de este módulo.
+const filterCls = controlClass('cyan');
 
 const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
   initialRequestId,
@@ -564,214 +572,201 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col md:flex-row gap-6 bg-white rounded-xl shadow-sm border border-slate-200">
-        {/* Lista */}
-        <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col md:max-h-[calc(100vh-8rem)] md:overflow-y-auto custom-scrollbar">
-          {loading ? (
-            <div className="p-8 text-center text-slate-400">Cargando solicitudes...</div>
-          ) : filteredRequests.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">No hay solicitudes de compra registradas.</div>
+      <MasterDetail
+        items={filteredRequests}
+        selectedId={selectedRequestId}
+        onSelect={setSelectedRequestId}
+        accent="cyan"
+        // Este módulo no tiene acta imprimible propia: si se ocultara al
+        // imprimir, la hoja saldría en blanco.
+        hideOnPrint={false}
+        loading={loading}
+        loadingMessage="Cargando solicitudes..."
+        emptyMessage="No hay solicitudes de compra registradas."
+        emptyDetail={<NoSelection icon={FileText} message="Selecciona una solicitud para ver el detalle" />}
+        renderRow={(request, isSelected) => (
+          <>
+          <div className="flex justify-between items-start mb-1 gap-2">
+            <h3 className={`font-medium text-sm truncate ${isSelected ? 'text-cyan-900' : 'text-slate-800'}`}>{request.code}</h3>
+            <StatusChip status={request.status} tone={STATUS_CHIP[request.status]} />
+          </div>
+          <p className="text-xs text-slate-500 mb-1 truncate">{request.requesterName} · {request.area}</p>
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>{formatDate(request.requestDate)}</span>
+            <span>{request.lines.length ? `${request.lines.length} producto(s)` : ''}</span>
+          </div>
+          </>
+        )}
+        // Igual que en Órdenes: la lista trae las solicitudes sin el detalle
+        // completo, que llega aparte en `selectedRequest` junto con su
+        // histórico. Por eso se ignora el elemento que pasa MasterDetail.
+        renderDetail={() => (
+          !selectedRequest ? (
+            <NoSelection icon={FileText} message="Selecciona una solicitud para ver el detalle" />
           ) : (
-            filteredRequests.map((request) => {
-              const isSelected = request.id === selectedRequestId;
-              return (
-                <div
-                  key={request.id}
-                  onClick={() => setSelectedRequestId(request.id)}
-                  className={`p-4 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors ${isSelected ? 'bg-cyan-50/60 border-l-4 border-l-cyan-500' : 'border-l-4 border-l-transparent'}`}
-                >
-                  <div className="flex justify-between items-start mb-1 gap-2">
-                    <h3 className={`font-medium text-sm truncate ${isSelected ? 'text-cyan-900' : 'text-slate-800'}`}>{request.code}</h3>
-                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-bold border ${STATUS_CHIP[request.status]}`}>
-                      {request.status.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mb-1 truncate">{request.requesterName} · {request.area}</p>
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>{formatDate(request.requestDate)}</span>
-                    <span>{request.lines.length ? `${request.lines.length} producto(s)` : ''}</span>
-                  </div>
+          <>
+            <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start gap-4">
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-slate-800 truncate">{selectedRequest.code}</h2>
+                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500 mt-1">
+                  <span className="flex items-center gap-1"><User size={14} /> {selectedRequest.requesterName} ({selectedRequest.position})</span>
+                  <span className="flex items-center gap-1"><Calendar size={14} /> {formatDate(selectedRequest.requestDate)}</span>
                 </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Detalle */}
-        <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30">
-          {selectedRequest ? (
-            <>
-              <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-slate-800 truncate">{selectedRequest.code}</h2>
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500 mt-1">
-                    <span className="flex items-center gap-1"><User size={14} /> {selectedRequest.requesterName} ({selectedRequest.position})</span>
-                    <span className="flex items-center gap-1"><Calendar size={14} /> {formatDate(selectedRequest.requestDate)}</span>
-                  </div>
-                  <span className={`inline-block mt-2 text-xs px-2 py-0.5 rounded-full font-bold border ${STATUS_CHIP[selectedRequest.status]}`}>
-                    {selectedRequest.status.replace(/_/g, ' ')}
-                  </span>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  {canEdit && (
-                    <button onClick={() => handleEditStart(selectedRequest)} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar">
-                      <Edit size={18} />
-                    </button>
-                  )}
-                  {canSubmit && (
-                    <button onClick={() => handleSubmitForApproval(selectedRequest)} className="p-2 border rounded hover:bg-cyan-50 text-cyan-600 border-cyan-200" title="Enviar a aprobación">
-                      <Send size={18} />
-                    </button>
-                  )}
-                  {canCancel && (
-                    <button onClick={() => handleCancelRequest(selectedRequest)} className="p-2 border rounded hover:bg-red-50 text-red-600 border-red-200" title="Cancelar solicitud">
-                      <Ban size={18} />
-                    </button>
-                  )}
-                </div>
+                <StatusChip status={selectedRequest.status} tone={STATUS_CHIP[selectedRequest.status]} size="md" className="inline-block mt-2" />
               </div>
-
-              <div className="flex-1 p-6 space-y-6">
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-sm text-slate-700">
-                  <p><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Área / Departamento</span>{selectedRequest.area}</p>
-                  <p className="mt-3"><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Jefe inmediato</span>{selectedRequest.supervisorName}</p>
-                  <p className="mt-3"><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Motivo / Justificación</span>{selectedRequest.reason}</p>
-                  {selectedRequest.rejectionReason && (
-                    <p className="mt-3 text-rose-700"><span className="font-bold text-rose-500 text-xs uppercase block mb-0.5">Motivo de rechazo</span>{selectedRequest.rejectionReason}</p>
-                  )}
-                </div>
-
-                {canDecide && (
-                  <div className="bg-white rounded-xl border border-cyan-200 shadow-sm p-4">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
-                      <UserCog size={16} /> Decisión del jefe inmediato
-                    </h3>
-
-                    {!actingEmployeeId && (
-                      <p className="mb-3 text-sm text-amber-700 flex items-center gap-2">
-                        <AlertTriangle size={14} /> Elige un empleado en "Actuando como" para poder aprobar o rechazar.
-                      </p>
-                    )}
-                    {supervisorMismatch && (
-                      <p className="mb-3 text-sm text-amber-700 flex items-center gap-2">
-                        <AlertTriangle size={14} />
-                        El jefe inmediato registrado es <strong className="mx-1">{selectedRequest.supervisorName}</strong>,
-                        pero estás actuando como <strong className="mx-1">{actingEmployeeName}</strong>. Se permite igual
-                        (sin seguridad real en esta fase), pero verifica que sea correcto.
-                      </p>
-                    )}
-
-                    <label className="block text-xs font-medium text-slate-500 mb-1">
-                      Comentario (opcional para aprobar, obligatorio para rechazar)
-                    </label>
-                    <textarea
-                      value={decisionComment}
-                      onChange={(e) => setDecisionComment(e.target.value)}
-                      rows={2}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 outline-none"
-                    />
-
-                    <div className="mt-3 flex justify-end gap-2">
-                      <button
-                        onClick={() => handleReject(selectedRequest)}
-                        disabled={deciding || !actingEmployeeId}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white rounded-lg font-medium transition-colors"
-                      >
-                        <XCircle size={18} /> Rechazar
-                      </button>
-                      <button
-                        onClick={() => handleApprove(selectedRequest)}
-                        disabled={deciding || !actingEmployeeId}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-lg font-medium transition-colors"
-                      >
-                        <CheckCircle2 size={18} /> Aprobar
-                      </button>
-                    </div>
-                  </div>
+              <div className="flex gap-2 shrink-0">
+                {canEdit && (
+                  <button onClick={() => handleEditStart(selectedRequest)} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar">
+                    <Edit size={18} />
+                  </button>
                 )}
+                {canSubmit && (
+                  <button onClick={() => handleSubmitForApproval(selectedRequest)} className="p-2 border rounded hover:bg-cyan-50 text-cyan-600 border-cyan-200" title="Enviar a aprobación">
+                    <Send size={18} />
+                  </button>
+                )}
+                {canCancel && (
+                  <button onClick={() => handleCancelRequest(selectedRequest)} className="p-2 border rounded hover:bg-red-50 text-red-600 border-red-200" title="Cancelar solicitud">
+                    <Ban size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
 
-                <div>
-                  <h3 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><FileText size={16} /> Detalle de productos</h3>
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
-                    {loadingDetail ? (
-                      <div className="p-8 text-center text-slate-400">Cargando detalle...</div>
-                    ) : (
-                      <table className="w-full text-left text-sm min-w-[640px]">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
-                          <tr>
-                            <th className="px-4 py-3">Producto</th>
-                            <th className="px-4 py-3 text-right">Cantidad</th>
-                            <th className="px-4 py-3">Unidad</th>
-                            <th className="px-4 py-3">Área destino</th>
-                            <th className="px-4 py-3">Prioridad</th>
-                            <th className="px-4 py-3">Observaciones</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {selectedRequest.lines.length === 0 ? (
-                            <tr><td colSpan={6} className="p-4 text-center text-slate-400">Sin productos.</td></tr>
-                          ) : (
-                            selectedRequest.lines.map((line) => (
-                              <tr key={line.id || line.product}>
-                                <td className="px-4 py-3 font-medium">{line.product}</td>
-                                <td className="px-4 py-3 text-right">{line.quantity}</td>
-                                <td className="px-4 py-3">{line.unit}</td>
-                                <td className="px-4 py-3">{line.targetArea || '—'}</td>
-                                <td className="px-4 py-3">{line.priority || '—'}</td>
-                                <td className="px-4 py-3">{line.notes || '—'}</td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    )}
+            <div className="flex-1 p-6 space-y-6">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-sm text-slate-700">
+                <p><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Área / Departamento</span>{selectedRequest.area}</p>
+                <p className="mt-3"><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Jefe inmediato</span>{selectedRequest.supervisorName}</p>
+                <p className="mt-3"><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Motivo / Justificación</span>{selectedRequest.reason}</p>
+                {selectedRequest.rejectionReason && (
+                  <p className="mt-3 text-rose-700"><span className="font-bold text-rose-500 text-xs uppercase block mb-0.5">Motivo de rechazo</span>{selectedRequest.rejectionReason}</p>
+                )}
+              </div>
+
+              {canDecide && (
+                <div className="bg-white rounded-xl border border-cyan-200 shadow-sm p-4">
+                  <h3 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                    <UserCog size={16} /> Decisión del jefe inmediato
+                  </h3>
+
+                  {!actingEmployeeId && (
+                    <p className="mb-3 text-sm text-amber-700 flex items-center gap-2">
+                      <AlertTriangle size={14} /> Elige un empleado en "Actuando como" para poder aprobar o rechazar.
+                    </p>
+                  )}
+                  {supervisorMismatch && (
+                    <p className="mb-3 text-sm text-amber-700 flex items-center gap-2">
+                      <AlertTriangle size={14} />
+                      El jefe inmediato registrado es <strong className="mx-1">{selectedRequest.supervisorName}</strong>,
+                      pero estás actuando como <strong className="mx-1">{actingEmployeeName}</strong>. Se permite igual
+                      (sin seguridad real en esta fase), pero verifica que sea correcto.
+                    </p>
+                  )}
+
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Comentario (opcional para aprobar, obligatorio para rechazar)
+                  </label>
+                  <textarea
+                    value={decisionComment}
+                    onChange={(e) => setDecisionComment(e.target.value)}
+                    rows={2}
+                    className={filterCls}
+                  />
+
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button
+                      onClick={() => handleReject(selectedRequest)}
+                      disabled={deciding || !actingEmployeeId}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white rounded-lg font-medium transition-colors"
+                    >
+                      <XCircle size={18} /> Rechazar
+                    </button>
+                    <button
+                      onClick={() => handleApprove(selectedRequest)}
+                      disabled={deciding || !actingEmployeeId}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-lg font-medium transition-colors"
+                    >
+                      <CheckCircle2 size={18} /> Aprobar
+                    </button>
                   </div>
                 </div>
+              )}
 
-                <ProformaPanel
-                  request={selectedRequest}
-                  actingRole={actingRole}
-                  actingEmployeeName={actingEmployeeName}
-                  onNavigateToOrder={onNavigateToOrder}
-                  onRequestUpdated={async (updated) => {
-                    await refresh();
-                    await reloadSelectedDetail(updated.id);
-                  }}
-                />
-
-                <div>
-                  <h3 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><Clock size={16} /> Histórico</h3>
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
-                    {history.length === 0 ? (
-                      <div className="p-4 text-center text-slate-400 text-sm">Sin movimientos registrados.</div>
-                    ) : (
-                      history.map((entry) => (
-                        <div key={entry.id} className="p-3 text-sm flex justify-between gap-3">
-                          <div>
-                            <p className="text-slate-800"><span className="font-medium">{entry.actorName}</span> · {entry.action}</p>
-                            {entry.details && <p className="text-xs text-slate-500 mt-0.5">{entry.details}</p>}
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-xs text-slate-400">{formatDateTime(entry.date)}</p>
-                            <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full font-bold border ${STATUS_CHIP[entry.status]}`}>
-                              {entry.status.replace(/_/g, ' ')}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><FileText size={16} /> Detalle de productos</h3>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
+                  {loadingDetail ? (
+                    <div className="p-8 text-center text-slate-400">Cargando detalle...</div>
+                  ) : (
+                    <table className="w-full text-left text-sm min-w-[640px]">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">Producto</th>
+                          <th className="px-4 py-3 text-right">Cantidad</th>
+                          <th className="px-4 py-3">Unidad</th>
+                          <th className="px-4 py-3">Área destino</th>
+                          <th className="px-4 py-3">Prioridad</th>
+                          <th className="px-4 py-3">Observaciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedRequest.lines.length === 0 ? (
+                          <tr><td colSpan={6} className="p-4 text-center text-slate-400">Sin productos.</td></tr>
+                        ) : (
+                          selectedRequest.lines.map((line) => (
+                            <tr key={line.id || line.product}>
+                              <td className="px-4 py-3 font-medium">{line.product}</td>
+                              <td className="px-4 py-3 text-right">{line.quantity}</td>
+                              <td className="px-4 py-3">{line.unit}</td>
+                              <td className="px-4 py-3">{line.targetArea || '—'}</td>
+                              <td className="px-4 py-3">{line.priority || '—'}</td>
+                              <td className="px-4 py-3">{line.notes || '—'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
-            </>
-          ) : (
-            <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center text-slate-400">
-              <FileText size={48} className="opacity-20 mb-4" />
-              <p>Selecciona una solicitud para ver el detalle</p>
+
+              <ProformaPanel
+                request={selectedRequest}
+                actingRole={actingRole}
+                actingEmployeeName={actingEmployeeName}
+                onNavigateToOrder={onNavigateToOrder}
+                onRequestUpdated={async (updated) => {
+                  await refresh();
+                  await reloadSelectedDetail(updated.id);
+                }}
+              />
+
+              <div>
+                <h3 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><Clock size={16} /> Histórico</h3>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+                  {history.length === 0 ? (
+                    <div className="p-4 text-center text-slate-400 text-sm">Sin movimientos registrados.</div>
+                  ) : (
+                    history.map((entry) => (
+                      <div key={entry.id} className="p-3 text-sm flex justify-between gap-3">
+                        <div>
+                          <p className="text-slate-800"><span className="font-medium">{entry.actorName}</span> · {entry.action}</p>
+                          {entry.details && <p className="text-xs text-slate-500 mt-0.5">{entry.details}</p>}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs text-slate-400">{formatDateTime(entry.date)}</p>
+                          <StatusChip status={entry.status} tone={STATUS_CHIP[entry.status]} className="inline-block mt-1" />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          </>
+          )
+        )}
+      />
 
       <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} busy={deciding} />
     </div>

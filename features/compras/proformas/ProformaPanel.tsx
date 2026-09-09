@@ -35,6 +35,8 @@ import {
   getPurchaseRequestErrorMessage,
 } from '@/features/compras/solicitudes/purchaseRequestService';
 import { formatDate } from '@/shared/utils/reportUtils';
+import { controlClass, labelClass } from '@/shared/components/ui/Field';
+import StatusChip from '@/shared/components/ui/StatusChip';
 
 const VALIDITY_CHIP: Record<string, string> = {
   VIGENTE: 'text-emerald-600 border-emerald-300 bg-emerald-50',
@@ -68,9 +70,11 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 const MAX_ATTACHMENT_MB = 5;
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
 
-const inputCls =
-  'w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 outline-none bg-white text-sm';
-const labelCls = 'block text-xs font-medium text-slate-500 mb-1';
+// Clases de campo compartidas (shared/components/ui/Field.tsx). Tamaño 'sm'
+// porque este panel va embebido en el detalle de una solicitud, no en una
+// página propia: es la diferencia que antes estaba escrita a mano.
+const inputCls = controlClass('cyan', 'sm');
+const labelCls = labelClass('sm');
 
 const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, actingEmployeeName, onRequestUpdated, onNavigateToOrder }) => {
   const [proformas, setProformas] = useState<Proforma[]>([]);
@@ -421,7 +425,7 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
                     <span>Entrega: {p.deliveryTime || '—'}</span>
                     <span className="flex items-center gap-1">
                       Vence: {formatDate(p.expiryDate)}
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold border ${VALIDITY_CHIP[validity]}`}>{VALIDITY_LABEL[validity]}</span>
+                      <StatusChip status={VALIDITY_LABEL[validity]} tone={VALIDITY_CHIP[validity]} />
                     </span>
                     <span>Pago: {p.paymentTerms || '—'}</span>
                   </div>

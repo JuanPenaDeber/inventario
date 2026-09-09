@@ -5,6 +5,11 @@ import { Provider } from '@/types';
 import { getProviders, addProvider, deleteProvider, getInventoryErrorMessage } from '@/shared/api/inventoryService';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
+import { controlClass } from '@/shared/components/ui/Field';
+
+// Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
+// purple es el de este módulo.
+const inputCls = controlClass('purple') + ' mt-1';
 
 const ProviderManager: React.FC = () => {
   const { data: providers, setData: setProviders, loading, error, setError } = useAsyncData<Provider[]>(
@@ -94,7 +99,7 @@ const ProviderManager: React.FC = () => {
                             required
                             value={newProvider.name}
                             onChange={e => setNewProvider({...newProvider, name: e.target.value})}
-                            className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                            className={inputCls}
                         />
                     </div>
                     <div>
@@ -103,7 +108,7 @@ const ProviderManager: React.FC = () => {
                             type="text" 
                             value={newProvider.contactPerson}
                             onChange={e => setNewProvider({...newProvider, contactPerson: e.target.value})}
-                            className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                            className={inputCls}
                         />
                     </div>
                     <div>
@@ -112,7 +117,7 @@ const ProviderManager: React.FC = () => {
                             type="email" 
                             value={newProvider.email}
                             onChange={e => setNewProvider({...newProvider, email: e.target.value})}
-                            className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                            className={inputCls}
                         />
                     </div>
                     <div>
@@ -121,7 +126,7 @@ const ProviderManager: React.FC = () => {
                             type="tel" 
                             value={newProvider.phone}
                             onChange={e => setNewProvider({...newProvider, phone: e.target.value})}
-                            className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                            className={inputCls}
                         />
                     </div>
                     <button disabled={saving} className="w-full bg-purple-600 disabled:bg-purple-300 text-white py-2 rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 font-medium">

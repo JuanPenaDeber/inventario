@@ -4,12 +4,17 @@ import { InventoryItem, Provider, Employee } from '@/types';
 import { getProviders, getEmployees, createAssignment, createAssignmentEquipo } from '@/shared/api/inventoryService';
 import { getPhotoUrl } from '@/shared/api/photoServer';
 import CameraModal from '@/features/inventario/CameraModal';
+import { controlClass } from '@/shared/components/ui/Field';
 
 interface InventoryFormProps {
   initialData?: InventoryItem;
   onSave: (item: any) => void;
   onCancel: () => void;
 }
+
+// Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
+// indigo es el de este módulo.
+const inputCls = controlClass('indigo');
 
 const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -499,7 +504,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
                       <div className="mb-6">
                           <label className="block text-sm font-medium text-slate-700 mb-2">Autorizado Por:</label>
                           <select 
-                             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                             className={inputCls}
                              value={assignmentAuthorizerId}
                              onChange={(e) => setAssignmentAuthorizerId(e.target.value)}
                           >

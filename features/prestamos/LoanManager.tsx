@@ -23,6 +23,13 @@ import { getLogoUrl } from '@/shared/api/photoServer';
 import DateRangeBar from '@/shared/components/DateRangeBar';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
+import MasterDetail from '@/shared/components/MasterDetail';
+import { NoSelection } from '@/shared/components/ui/States';
+import { controlClass } from '@/shared/components/ui/Field';
+
+// Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
+// orange es el de este módulo.
+const inputCls = controlClass('orange');
 
 const LoanManager: React.FC = () => {
     const [viewMode, setViewMode] = useState<'dashboard' | 'create' | 'edit'>('dashboard');
@@ -525,7 +532,7 @@ const LoanManager: React.FC = () => {
                                         value={name}
                                         onChange={e => setName(e.target.value)}
                                         placeholder="Ej: Préstamo Cámaras Evento X"
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                                        className={inputCls}
                                     />
                                 </div>
 
@@ -537,7 +544,7 @@ const LoanManager: React.FC = () => {
                                         required
                                         value={fechaPrestamo}
                                         onChange={e => setfechaPrestamo(e.target.value)}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                                        className={inputCls}
                                     />
                                 </div>
 
@@ -548,7 +555,7 @@ const LoanManager: React.FC = () => {
                                             required
                                             value={solicitanteId}
                                             onChange={handleEmployeeChange}
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none bg-white"
+                                            className={inputCls}
                                         >
                                             <option value="">Seleccionar Empleado</option>
                                             {employees.map(e => (
@@ -575,7 +582,7 @@ const LoanManager: React.FC = () => {
                                         required
                                         value={responsableId}
                                         onChange={handleResponsibleChange}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none bg-white"
+                                        className={inputCls}
                                     >
                                         <option value="">Seleccionar Solicitante</option>
                                         {employees.map(e => (
@@ -589,7 +596,7 @@ const LoanManager: React.FC = () => {
                                         required
                                         value={entregadoporId}
                                         onChange={handleEntregadoporChange}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none bg-white"
+                                        className={inputCls}
                                     >
                                         <option value="">Seleccionar Autorizador</option>
                                         {employees.map(e => (
@@ -605,7 +612,7 @@ const LoanManager: React.FC = () => {
                                         type="date"
                                         value={fechaEsperadaDevolucion}
                                         onChange={e => setFechaEsperadaDevolucion(e.target.value)}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                                        className={inputCls}
                                     />
                                 </div>
 
@@ -616,7 +623,7 @@ const LoanManager: React.FC = () => {
                                         type="datetime-local"
                                         value={fechaHoraDevolucion}
                                         onChange={e => setFechaHoraDevolucion(e.target.value)}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                                        className={inputCls}
                                     />
                                 </div>
 
@@ -625,7 +632,7 @@ const LoanManager: React.FC = () => {
                                     <textarea
                                         value={observations}
                                         onChange={e => setObservations(e.target.value)}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                                        className={inputCls}
                                         rows={3}
                                     />
                                 </div>
@@ -706,170 +713,147 @@ const LoanManager: React.FC = () => {
                 />
 
                 {/* --- MASTER DETAIL DASHBOARD --- */}
-                <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200 no-print">
+                <MasterDetail
+                    items={filteredLoans}
+                    selectedId={selectedLoanId}
+                    onSelect={setSelectedLoanId}
+                    accent="orange"
+                    loading={loading}
+                    loadingMessage="Cargando datos..."
+                    emptyMessage="No hay préstamos registrados."
+                    search={loanSearch}
+                    onSearchChange={setLoanSearch}
+                    searchPlaceholder="Buscar préstamo..."
+                    emptyDetail={<NoSelection icon={ClipboardList} message="Seleccione un préstamo para ver detalles" />}
+                    renderRow={(loan, isSelected) => {
+                        const isReturned =
+                            loan.status === 'DEVUELTO' ||
+                            loan.status === 'FINALIZADO' ||
+                            loan.fechaHoraDevolucion;
+                        // Activo = todo lo que no fue devuelto explícitamente.
+                        const isActive = !isReturned;
+                        const isLoanOverdue =
+                            isActive && isOverdue(loan.fechaEsperadaDevolucion || loan.fechaHoraDevolucion);
 
-                    {/* Master: List (Left Side) */}
-                    <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col">
-                        <div className="p-4 border-b border-slate-100">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar préstamo..."
-                                    value={loanSearch}
-                                    onChange={(e) => setLoanSearch(e.target.value)}
-                                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                />
+                        return (
+                            <>
+                            <div className="flex justify-between items-start mb-1">
+                                <h3 className={`font-medium text-sm ${isSelected ? 'text-orange-900' : 'text-slate-800'}`}>{getEmployeeName(loan.solicitanteId)}</h3>
+                                {isActive ? (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isLoanOverdue ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                                        {isLoanOverdue ? 'VENCIDO' : 'ACTIVO'}
+                                    </span>
+                                ) : (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-slate-100 text-slate-500">FINALIZADO</span>
+                                )}
+                            </div>
+                            <p className="text-xs text-slate-500 mb-1">{loan.area}</p>
+                            <p className="text-[10px] text-slate-400 italic mb-2 truncate">{loan.name}</p>
+                            <div className="flex justify-between text-xs text-slate-400">
+                                <span>{new Date(loan.fechaPrestamo).toISOString().split('T')[0]}</span>
+                            </div>
+                            </>
+                        );
+                    }}
+                    renderDetail={(selectedLoan) => (
+                        <>
+                        <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800">{getEmployeeName(selectedLoan.solicitanteId)}</h2>
+                                <p className="text-sm text-slate-600 font-medium">{selectedLoan.name}</p>
+                                <div className="flex items-center gap-4 text-sm text-slate-500 mt-2">
+                                    <span className="flex items-center gap-1"><User size={14} /> {selectedLoan.area}</span>
+                                    <span className="flex items-center gap-1"><Clock size={14} /> Devolución: {(selectedLoan.fechaEsperadaDevolucion || selectedLoan.fechaHoraDevolucion) ? new Date(selectedLoan.fechaEsperadaDevolucion || selectedLoan.fechaHoraDevolucion).toISOString().split('T')[0] : 'Indefinido'}</span>
+                                </div>
+                                {selectedLoan.entregadoporId && <p className="text-xs text-slate-400 mt-1 flex items-center gap-1"><ShieldCheck size={12} /> Entregado por: {getEmployeeName(selectedLoan.entregadoporId)}</p>}
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={handleEditStart} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar">
+                                    <Edit size={18} />
+                                </button>
+                                <button onClick={handlePrintLoan} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Imprimir">
+                                    <Printer size={18} />
+                                </button>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar">
-                            {loading ? (
-                                <div className="p-8 text-center text-slate-400">Cargando datos...</div>
-                            ) : filteredLoans.length === 0 ? (
-                                <div className="p-8 text-center text-slate-400">No hay préstamos registrados.</div>
-                            ) : (
-                                filteredLoans.map(loan => {
-                                    const isSelected = loan.id === selectedLoanId;
-                                    const isReturned = loan.status === 'DEVUELTO' || loan.status === 'FINALIZADO' || loan.fechaHoraDevolucion;
-                                    // Active if NOT explicitly returned.
-                                    const isActive = !isReturned;
-                                    const isLoanOverdue = isActive && isOverdue(loan.fechaEsperadaDevolucion || loan.fechaHoraDevolucion);
 
-                                    return (
-                                        <div
-                                            key={loan.id}
-                                            onClick={() => setSelectedLoanId(loan.id)}
-                                            className={`p-4 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors ${isSelected ? 'bg-orange-50/60 border-l-4 border-l-orange-500' : 'border-l-4 border-l-transparent'}`}
-                                        >
-                                            <div className="flex justify-between items-start mb-1">
-                                                <h3 className={`font-medium text-sm ${isSelected ? 'text-orange-900' : 'text-slate-800'}`}>{getEmployeeName(loan.solicitanteId)}</h3>
-                                                {isActive ? (
-                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isLoanOverdue ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                                        {isLoanOverdue ? 'VENCIDO' : 'ACTIVO'}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-slate-100 text-slate-500">FINALIZADO</span>
-                                                )}
-                                            </div>
-                                            <p className="text-xs text-slate-500 mb-1">{loan.area}</p>
-                                            <p className="text-[10px] text-slate-400 italic mb-2 truncate">{loan.name}</p>
-                                            <div className="flex justify-between text-xs text-slate-400">
-                                                <span>{new Date(loan.fechaPrestamo).toISOString().split('T')[0]}</span>
-                                            </div>
-                                        </div>
-                                    );
-                                })
+                        <div className="flex-1 overflow-y-auto p-6">
+                            {selectedLoan.description && (
+                                <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
+                                    <span className="font-bold">Observaciones:</span> {selectedLoan.description}
+                                </div>
+                            )}
+
+                            <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2"><FileText size={16} /> Equipos Prestados</h3>
+
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                {loadingItems ? (
+                                    <div className="p-8 text-center text-slate-400">Cargando equipos...</div>
+                                ) : (
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                                            <tr>
+                                                <th className="px-4 py-3 w-8"></th>
+                                                <th className="px-4 py-3">Equipo</th>
+                                                <th className="px-4 py-3">Código</th>
+                                                <th className="px-4 py-3">Estado</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {currentLoanItems.length === 0 ? (
+                                                <tr><td colSpan={4} className="p-4 text-center text-slate-400">No hay equipos en este préstamo (Todos devueltos).</td></tr>
+                                            ) : (
+                                                currentLoanItems.map(item => (
+                                                    <tr key={item.id} className={item.fechaDevolucion ? 'bg-green-50/30' : ''}>
+                                                        <td className="px-4 py-3">
+                                                            {/* Only show checkbox if NOT returned */}
+                                                            {!item.fechaDevolucion && (
+                                                                <button onClick={() => toggleReturnSelection(item.id)} className="text-slate-300 hover:text-blue-500">
+                                                                    {itemsToReturn.has(item.id) ? <CheckSquare size={18} className="text-blue-600" /> : <Square size={18} />}
+                                                                </button>
+                                                            )}
+                                                            {item.fechaDevolucion && (
+                                                                <CheckCircle size={18} className="text-green-500" />
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-3 font-medium">{item.name}</td>
+                                                        <td className="px-4 py-3 font-mono text-slate-500">{item.serie}</td>
+                                                        <td className="px-4 py-3">
+                                                            {item.fechaDevolucion ? (
+                                                                <div>
+                                                                    <span className="text-green-600 font-bold text-xs bg-green-100 px-2 py-0.5 rounded">DEVUELTO</span>
+                                                                    <div className="text-[10px] text-slate-500 mt-0.5">{new Date(item.fechaDevolucion).toLocaleDateString()} {new Date(item.fechaDevolucion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-orange-600 font-medium text-xs">PENDIENTE</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+
+                            {/* The Button is now ALWAYS visible if the loan is ACTIVE, but disabled if no items selected */}
+                            {/* We check !isReturned (Active) instead of status === 'PRESTADO' */}
+                            {(selectedLoan.status !== 'DEVUELTO' && selectedLoan.status !== 'FINALIZADO') && currentLoanItems.length > 0 && (
+                                <div className="mt-6 flex justify-end">
+                                    <button
+                                        onClick={handlePartialReturn}
+                                        disabled={saving || itemsToReturn.size === 0}
+                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                                    >
+                                        <CheckCircle size={18} />
+                                        Registrar Devolución ({itemsToReturn.size})
+                                    </button>
+                                </div>
                             )}
                         </div>
-                    </div>
-
-                    {/* Detail View (Right Side) */}
-                    <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30">
-                        {selectedLoan ? (
-                            <>
-                                <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start">
-                                    <div>
-                                        <h2 className="text-xl font-bold text-slate-800">{getEmployeeName(selectedLoan.solicitanteId)}</h2>
-                                        <p className="text-sm text-slate-600 font-medium">{selectedLoan.name}</p>
-                                        <div className="flex items-center gap-4 text-sm text-slate-500 mt-2">
-                                            <span className="flex items-center gap-1"><User size={14} /> {selectedLoan.area}</span>
-                                            <span className="flex items-center gap-1"><Clock size={14} /> Devolución: {(selectedLoan.fechaEsperadaDevolucion || selectedLoan.fechaHoraDevolucion) ? new Date(selectedLoan.fechaEsperadaDevolucion || selectedLoan.fechaHoraDevolucion).toISOString().split('T')[0] : 'Indefinido'}</span>
-                                        </div>
-                                        {selectedLoan.entregadoporId && <p className="text-xs text-slate-400 mt-1 flex items-center gap-1"><ShieldCheck size={12} /> Entregado por: {getEmployeeName(selectedLoan.entregadoporId)}</p>}
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button onClick={handleEditStart} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Editar">
-                                            <Edit size={18} />
-                                        </button>
-                                        <button onClick={handlePrintLoan} className="p-2 border rounded hover:bg-slate-50 text-slate-600" title="Imprimir">
-                                            <Printer size={18} />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="flex-1 overflow-y-auto p-6">
-                                    {selectedLoan.description && (
-                                        <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
-                                            <span className="font-bold">Observaciones:</span> {selectedLoan.description}
-                                        </div>
-                                    )}
-
-                                    <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2"><FileText size={16} /> Equipos Prestados</h3>
-
-                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                                        {loadingItems ? (
-                                            <div className="p-8 text-center text-slate-400">Cargando equipos...</div>
-                                        ) : (
-                                            <table className="w-full text-left text-sm">
-                                                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
-                                                    <tr>
-                                                        <th className="px-4 py-3 w-8"></th>
-                                                        <th className="px-4 py-3">Equipo</th>
-                                                        <th className="px-4 py-3">Código</th>
-                                                        <th className="px-4 py-3">Estado</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {currentLoanItems.length === 0 ? (
-                                                        <tr><td colSpan={4} className="p-4 text-center text-slate-400">No hay equipos en este préstamo (Todos devueltos).</td></tr>
-                                                    ) : (
-                                                        currentLoanItems.map(item => (
-                                                            <tr key={item.id} className={item.fechaDevolucion ? 'bg-green-50/30' : ''}>
-                                                                <td className="px-4 py-3">
-                                                                    {/* Only show checkbox if NOT returned */}
-                                                                    {!item.fechaDevolucion && (
-                                                                        <button onClick={() => toggleReturnSelection(item.id)} className="text-slate-300 hover:text-blue-500">
-                                                                            {itemsToReturn.has(item.id) ? <CheckSquare size={18} className="text-blue-600" /> : <Square size={18} />}
-                                                                        </button>
-                                                                    )}
-                                                                    {item.fechaDevolucion && (
-                                                                        <CheckCircle size={18} className="text-green-500" />
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-4 py-3 font-medium">{item.name}</td>
-                                                                <td className="px-4 py-3 font-mono text-slate-500">{item.serie}</td>
-                                                                <td className="px-4 py-3">
-                                                                    {item.fechaDevolucion ? (
-                                                                        <div>
-                                                                            <span className="text-green-600 font-bold text-xs bg-green-100 px-2 py-0.5 rounded">DEVUELTO</span>
-                                                                            <div className="text-[10px] text-slate-500 mt-0.5">{new Date(item.fechaDevolucion).toLocaleDateString()} {new Date(item.fechaDevolucion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <span className="text-orange-600 font-medium text-xs">PENDIENTE</span>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        ))
-                                                    )}
-                                                </tbody>
-                                            </table>
-                                        )}
-                                    </div>
-
-                                    {/* The Button is now ALWAYS visible if the loan is ACTIVE, but disabled if no items selected */}
-                                    {/* We check !isReturned (Active) instead of status === 'PRESTADO' */}
-                                    {(selectedLoan.status !== 'DEVUELTO' && selectedLoan.status !== 'FINALIZADO') && currentLoanItems.length > 0 && (
-                                        <div className="mt-6 flex justify-end">
-                                            <button
-                                                onClick={handlePartialReturn}
-                                                disabled={saving || itemsToReturn.size === 0}
-                                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-                                            >
-                                                <CheckCircle size={18} />
-                                                Registrar Devolución ({itemsToReturn.size})
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            </>
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                                <ClipboardList size={48} className="opacity-20 mb-4" />
-                                <p>Seleccione un préstamo para ver detalles</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
+                        </>
+                    )}
+                />
                 </>
             )}
 
