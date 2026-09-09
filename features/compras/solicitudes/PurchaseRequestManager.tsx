@@ -23,8 +23,8 @@ import {
   PURCHASE_REQUEST_STATUSES,
   PurchaseFlowRole,
   PURCHASE_FLOW_ROLES,
-} from '../types';
-import { getEmployees } from '../services/inventoryService';
+} from '@/types';
+import { getEmployees } from '@/shared/api/inventoryService';
 import {
   getPurchaseRequests,
   getPurchaseRequest,
@@ -36,12 +36,14 @@ import {
   approvePurchaseRequest,
   rejectPurchaseRequest,
   getPurchaseRequestErrorMessage,
-} from '../services/purchaseRequestService';
-import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
-import DateRangeBar from './DateRangeBar';
-import PurchaseRequestForm, { PurchaseRequestFormValues } from './PurchaseRequestForm';
-import ProformaPanel from './ProformaPanel';
-import type { PurchaseRequestHistoryEntry } from '../types';
+} from '@/features/compras/solicitudes/purchaseRequestService';
+import { isWithinDateRange, downloadXlsx, formatDate, formatDateTime, rangeSuffix } from '@/shared/utils/reportUtils';
+import DateRangeBar from '@/shared/components/DateRangeBar';
+import PurchaseRequestForm, { PurchaseRequestFormValues } from '@/features/compras/solicitudes/PurchaseRequestForm';
+import ProformaPanel from '@/features/compras/proformas/ProformaPanel';
+import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import type { PurchaseRequestHistoryEntry } from '@/types';
 
 const STATUS_CHIP: Record<PurchaseRequestStatus, string> = {
   BORRADOR: 'text-slate-600 border-slate-300 bg-slate-50',
@@ -62,14 +64,6 @@ const STATUS_CHIP: Record<PurchaseRequestStatus, string> = {
 const IN_PROGRESS_STATUSES: PurchaseRequestStatus[] = [
   'EN_COTIZACION', 'COTIZADA', 'EN_EVALUACION', 'APROBADA_PARA_COMPRA', 'ORDEN_GENERADA', 'FINALIZADA',
 ];
-
-/** Fecha y hora legible para las entradas del histórico. */
-const formatDateTime = (iso?: string | null): string => {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  if (isNaN(date.getTime())) return '—';
-  return date.toLocaleString('es-BO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-};
 
 // --- "Actuando como" (Fase 2) -----------------------------------------------
 // Selector ligero SIN seguridad real: no hay login, así que cualquiera puede
@@ -116,10 +110,24 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
   onNavigateToOrder,
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [requests, setRequests] = useState<PurchaseRequest[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const {
+    data: { requests, employees },
+    loading,
+    error,
+    setError,
+    refresh,
+  } = useAsyncData<{ requests: PurchaseRequest[]; employees: Employee[] }>(
+    async () => {
+      const [reqData, empData] = await Promise.all([getPurchaseRequests(), getEmployees()]);
+      return { requests: reqData, employees: empData };
+    },
+    { requests: [], employees: [] },
+    {
+      errorMessage: 'No se pudieron cargar las solicitudes de compra.',
+      getErrorMessage: getPurchaseRequestErrorMessage,
+    },
+  );
 
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(initialRequestId || null);
   const [selectedRequest, setSelectedRequest] = useState<PurchaseRequest | null>(null);
@@ -139,6 +147,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
   const [actingEmployeeId, setActingEmployeeId] = useState<string>(() => loadActingAs().employeeId);
   const [decisionComment, setDecisionComment] = useState('');
   const [deciding, setDeciding] = useState(false);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
 
   useEffect(() => {
     try {
@@ -152,24 +161,6 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
     () => employees.find((e) => e.id === actingEmployeeId)?.name || '',
     [employees, actingEmployeeId],
   );
-
-  const refresh = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [reqData, empData] = await Promise.all([getPurchaseRequests(), getEmployees()]);
-      setRequests(reqData);
-      setEmployees(empData);
-    } catch (err) {
-      setError(getPurchaseRequestErrorMessage(err, 'No se pudieron cargar las solicitudes de compra.'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   // Consume la solicitud inicial (llegada por navegación cruzada) una sola vez.
   useEffect(() => {
@@ -200,7 +191,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
       }
     };
     loadDetail();
-  }, [selectedRequestId]);
+  }, [selectedRequestId, setError]);
 
   /** Vuelve a traer detalle + histórico de una solicitud ya seleccionada. */
   const reloadSelectedDetail = async (id: string) => {
@@ -330,8 +321,17 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
     }
   };
 
-  const handleCancelRequest = async (request: PurchaseRequest) => {
-    if (!window.confirm(`¿Cancelar la solicitud ${request.code}? Esta acción no se puede deshacer.`)) return;
+  const handleCancelRequest = (request: PurchaseRequest) => {
+    setConfirmState({
+      message: `¿Cancelar la solicitud ${request.code}? Esta acción no se puede deshacer.`,
+      tone: 'danger',
+      confirmLabel: 'Cancelar solicitud',
+      onConfirm: () => doCancelRequest(request),
+    });
+  };
+
+  const doCancelRequest = async (request: PurchaseRequest) => {
+    setConfirmState(null);
     setError(null);
     try {
       await cancelPurchaseRequest(request.id, request.requesterName);
@@ -342,12 +342,20 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
     }
   };
 
-  const handleApprove = async (request: PurchaseRequest) => {
+  const handleApprove = (request: PurchaseRequest) => {
     if (!actingEmployeeName) {
       setError('Elige quién está "actuando como" jefe antes de aprobar.');
       return;
     }
-    if (!window.confirm(`¿Aprobar la solicitud ${request.code}?`)) return;
+    setConfirmState({
+      message: `¿Aprobar la solicitud ${request.code}?`,
+      confirmLabel: 'Aprobar',
+      onConfirm: () => doApprove(request),
+    });
+  };
+
+  const doApprove = async (request: PurchaseRequest) => {
+    setConfirmState(null);
     setDeciding(true);
     setError(null);
     try {
@@ -362,7 +370,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
     }
   };
 
-  const handleReject = async (request: PurchaseRequest) => {
+  const handleReject = (request: PurchaseRequest) => {
     if (!actingEmployeeName) {
       setError('Elige quién está "actuando como" jefe antes de rechazar.');
       return;
@@ -371,7 +379,16 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
       setError('El motivo de rechazo es obligatorio.');
       return;
     }
-    if (!window.confirm(`¿Rechazar la solicitud ${request.code}? Esta acción no se puede deshacer.`)) return;
+    setConfirmState({
+      message: `¿Rechazar la solicitud ${request.code}? Esta acción no se puede deshacer.`,
+      tone: 'danger',
+      confirmLabel: 'Rechazar',
+      onConfirm: () => doReject(request),
+    });
+  };
+
+  const doReject = async (request: PurchaseRequest) => {
+    setConfirmState(null);
     setDeciding(true);
     setError(null);
     try {
@@ -386,7 +403,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const header = ['Código', 'Fecha', 'Solicitante', 'Área', 'Cargo', 'Jefe inmediato', 'Estado', 'Motivo'];
     const rows = filteredRequests.map((r) => [
       r.code,
@@ -398,7 +415,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
       r.status,
       r.reason,
     ]);
-    downloadXlsx(
+    await downloadXlsx(
       `solicitudes_compra_${rangeSuffix(startDate, endDate)}.xlsx`,
       'SolicitudesCompra',
       [header, ...rows],
@@ -429,7 +446,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col">
+    <div className="min-h-[calc(100vh-8rem)] flex flex-col">
       <div className="flex justify-between items-center mb-6 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-cyan-100 text-cyan-600 rounded-xl">
@@ -471,9 +488,9 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
             <option key={emp.id} value={emp.id}>{emp.name}</option>
           ))}
         </select>
-        <span className="text-xs text-slate-400">
+        {/* <span className="text-xs text-slate-400">
           Sin contraseña ni validación real — solo decide qué acciones se muestran.
-        </span>
+        </span> */}
       </div>
 
       {error && (
@@ -547,9 +564,9 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200">
+      <div className="flex-1 flex flex-col md:flex-row gap-6 bg-white rounded-xl shadow-sm border border-slate-200">
         {/* Lista */}
-        <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col overflow-y-auto custom-scrollbar">
+        <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col md:max-h-[calc(100vh-8rem)] md:overflow-y-auto custom-scrollbar">
           {loading ? (
             <div className="p-8 text-center text-slate-400">Cargando solicitudes...</div>
           ) : filteredRequests.length === 0 ? (
@@ -581,7 +598,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
         </div>
 
         {/* Detalle */}
-        <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30 overflow-y-auto">
+        <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30">
           {selectedRequest ? (
             <>
               <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start gap-4">
@@ -614,7 +631,7 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex-1 p-6 space-y-6">
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-sm text-slate-700">
                   <p><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Área / Departamento</span>{selectedRequest.area}</p>
                   <p className="mt-3"><span className="font-bold text-slate-500 text-xs uppercase block mb-0.5">Jefe inmediato</span>{selectedRequest.supervisorName}</p>
@@ -748,13 +765,15 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+            <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center text-slate-400">
               <FileText size={48} className="opacity-20 mb-4" />
               <p>Selecciona una solicitud para ver el detalle</p>
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} busy={deciding} />
     </div>
   );
 };

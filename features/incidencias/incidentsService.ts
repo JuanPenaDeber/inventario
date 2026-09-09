@@ -3,8 +3,8 @@
 // El navegador habla DIRECTO con EspoCRM (igual que inventoryService), así que
 // el proyecto es 100% estático: basta `npm run build` + copiar dist/.
 // =============================================================================
-import { downloadXlsx } from './reportUtils';
-import { getEspoErrorMessage, createEspoFetch } from './espoClient';
+import { downloadXlsx, isWithinDateRange, formatDateTime } from '@/shared/utils/reportUtils';
+import { getEspoErrorMessage, createEspoFetch, createEspoList } from '@/shared/api/espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -16,9 +16,19 @@ export const INCIDENTS_API_URL =
 // Entidad personalizada de EspoCRM.
 const ENTITY = 'CIncidencia';
 
-// Contraseña fija del panel administrativo (temporal, sin JWT).
-export const ADMIN_PASSWORD =
-  import.meta.env.VITE_ADMIN_PASSWORD ?? 'eldeber2026';
+// Contraseña del portal público de incidencias (hoy desactivado: ver
+// ENABLE_USER_PORTAL en IncidentsModule.tsx).
+//
+// SIN valor por defecto a propósito. Antes caía a una contraseña fija escrita
+// en el código; hoy el portal está apagado y el bundler la elimina, pero con
+// solo activar el flag esa contraseña se habría publicado en el JS que
+// descarga cualquiera. Si no se configura VITE_ADMIN_PASSWORD, el portal
+// rechaza todos los intentos en vez de aceptar una contraseña conocida.
+//
+// Aclaración: esto es una compuerta de conveniencia en el navegador, no
+// seguridad real — cualquiera puede saltarla. La protección real son los
+// permisos del usuario API en EspoCRM.
+export const ADMIN_PASSWORD: string | undefined = import.meta.env.VITE_ADMIN_PASSWORD;
 
 // Dominio corporativo obligatorio para el correo del usuario.
 export const CORPORATE_DOMAIN = '@grupoeldeber.com';
@@ -132,6 +142,7 @@ export function getErrorMessage(error: unknown, fallback: string): string {
 
 /** Wrapper de fetch con la API key de EspoCRM, timeout y errores normalizados. */
 const espoFetch = createEspoFetch(INCIDENTS_API_URL);
+const listAll = createEspoList(espoFetch);
 
 // --- MAPEO EspoCRM <-> Frontend ---------------------------------------------
 
@@ -195,15 +206,8 @@ export async function createIncident(
 export async function getIncidents(
   _filters: IncidentFilters = {},
 ): Promise<Incident[]> {
-  const params = new URLSearchParams({
-    maxSize: '200',
-    offset: '0',
-    orderBy: 'createdAt',
-    order: 'desc',
-  });
-  const res = await espoFetch(`/${ENTITY}?${params.toString()}`);
-  const data = await res.json();
-  return (data.list ?? []).map(mapIncident);
+  const list = await listAll(`/${ENTITY}`, { orderBy: 'createdAt', order: 'desc' });
+  return list.map(mapIncident);
 }
 
 /** Actualiza estado, técnico y/o solución de una incidencia. */
@@ -234,7 +238,7 @@ export async function downloadExcelReport(
 ): Promise<void> {
   const all = await getIncidents();
   const inRange = all.filter((i) =>
-    isWithinRange(i.createdAt, startDate, endDate),
+    isWithinDateRange(i.createdAt, startDate, endDate),
   );
 
   const header = [
@@ -262,7 +266,7 @@ export async function downloadExcelReport(
     i.solucion ?? '',
   ]);
 
-  downloadXlsx(
+  await downloadXlsx(
     `incidencias_${startDate}_a_${endDate}.xlsx`,
     'Incidencias',
     [header, ...rows],
@@ -271,44 +275,8 @@ export async function downloadExcelReport(
 }
 
 // --- UTILIDADES DE FECHA ----------------------------------------------------
-
-export function toISODate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-export function today(): string {
-  return toISODate(new Date());
-}
-
-export function daysAgo(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return toISODate(d);
-}
-
-export function formatDateTime(iso?: string | null): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  if (isNaN(date.getTime())) return '—';
-  return date.toLocaleString('es-EC', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-export function isWithinRange(
-  iso: string,
-  startDate: string,
-  endDate: string,
-): boolean {
-  const value = new Date(iso).getTime();
-  const start = new Date(`${startDate}T00:00:00`).getTime();
-  const end = new Date(`${endDate}T23:59:59.999`).getTime();
-  return value >= start && value <= end;
-}
+// Este archivo definía sus propias toISODate/today/daysAgo/formatDateTime/
+// isWithinRange, casi idénticas a las de shared/utils/reportUtils.ts. Se
+// eliminaron: los componentes de Incidencias ahora importan las compartidas.
+// Además isWithinRange no tenía la protección contra el desfase de zona
+// horaria que isWithinDateRange sí resuelve.

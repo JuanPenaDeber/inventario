@@ -19,9 +19,9 @@
 // descuido de consistencia entre archivos.
 // =============================================================================
 
-import { InventoryItem, Provider, Loan, Assignment, Employee } from '../types';
-import { ESPOCRM_API_KEY } from './espoClient';
-import { getPhotoUploadUrl } from './photoServer';
+import { InventoryItem, Provider, Loan, Assignment, Employee } from '@/types';
+import { ESPOCRM_API_KEY } from '@/shared/api/espoClient';
+import { getPhotoUploadUrl } from '@/shared/api/photoServer';
 
 interface ApiResponse<T> {
     list: T[];
@@ -136,24 +136,43 @@ const MOCK_PROVIDERS: Provider[] = [
 ];
 
 // HELPER: Generic Fetch Wrapper
-async function apiRequest<T>(url: string, method: string = 'GET', body?: any): Promise<T | null> {
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased timeout to 10s
+/** Error de red o de EspoCRM en una operación de este servicio. */
+export class InventoryApiError extends Error {
+    status?: number;
+    constructor(message: string, status?: number) {
+        super(message);
+        this.name = 'InventoryApiError';
+        this.status = status;
+    }
+}
 
-        const options: RequestInit = {
+/** Mensaje legible para el usuario a partir de un error de escritura. */
+export function getInventoryErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof InventoryApiError) {
+        if (error.status === 403) return 'Sin permiso para esta operación. Revisa el rol del usuario API en EspoCRM.';
+        if (error.status === 404) return 'El registro ya no existe en EspoCRM.';
+        return `${fallback} (${error.message})`;
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'La operación tardó demasiado y se canceló. Verifica la conexión con EspoCRM.';
+    }
+    return fallback;
+}
+
+/** Petición base: SIEMPRE lanza si algo falla. */
+async function rawRequest<T>(url: string, method: string, body?: any): Promise<T> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+        const response = await fetch(url, {
             method,
             headers: HEADERS,
             body: body ? JSON.stringify(body) : undefined,
-            signal: controller.signal
-        };
-        
-        const response = await fetch(url, options);
-        clearTimeout(timeoutId);
+            signal: controller.signal,
+        });
 
         if (!response.ok) {
-            console.warn(`API Error ${response.status} on ${url}. Switching to fallback.`);
-            return null;
+            throw new InventoryApiError(`HTTP ${response.status} en ${url}`, response.status);
         }
 
         // Toda mutación (POST/PUT/DELETE) invalida la caché para que la próxima
@@ -161,19 +180,76 @@ async function apiRequest<T>(url: string, method: string = 'GET', body?: any): P
         if (method !== 'GET') invalidateCache();
 
         if (response.status === 204) return {} as T;
-        
-        const data = await response.json();
-        
-        // Handle structure { total: N, list: [...] } vs direct object
-        if (data && typeof data === 'object' && 'list' in data) {
-            return data; // Return the whole object if expected, or handle in caller
-        }
-        
-        return data;
+        return (await response.json()) as T;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+/**
+ * LECTURA con respaldo: devuelve null si falla, para que quien llame pueda
+ * caer a los MOCK_* y no dejar la pantalla vacía. Es una decisión deliberada
+ * (ver la nota de arquitectura al inicio del archivo).
+ */
+async function apiRequest<T>(url: string, method: string = 'GET', body?: any): Promise<T | null> {
+    try {
+        return await rawRequest<T>(url, method, body);
     } catch {
-        console.warn(`Network Error/Timeout on ${url}. Switching to fallback.`);
+        console.warn(`Fallo leyendo ${url}. Se usa el respaldo local.`);
         return null;
     }
+}
+
+/**
+ * ESCRITURA: propaga el error en vez de devolver null.
+ *
+ * Antes las mutaciones compartían el mismo `apiRequest` que las lecturas, así
+ * que un fallo devolvía null y cada función seguía adelante inventando un id
+ * local (`local-...`, `prov-...`): la interfaz daba el guardado por bueno
+ * aunque EspoCRM nunca hubiera recibido el registro, y el dato se perdía sin
+ * que nadie se enterara. Leer con respaldo es defendible; escribir no.
+ */
+async function apiWrite<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body?: any): Promise<T> {
+    return rawRequest<T>(url, method, body);
+}
+
+// --- PAGINACIÓN -------------------------------------------------------------
+// EspoCRM devuelve como máximo 200 registros por petición (pedirle más
+// responde vacío). Sin paginar, cualquier lista más larga se cortaba EN
+// SILENCIO: el inventario mostraba 200 de 429 equipos y el Dashboard decía
+// "Total: 200" como si fuera el número real.
+const PAGE_SIZE = 200;
+// Tope de seguridad: 50 páginas = 10.000 registros. Garantiza que el bucle
+// termine aunque el backend devuelva algo inesperado.
+const MAX_PAGES = 50;
+
+/**
+ * Trae TODAS las páginas de una lista de EspoCRM.
+ *
+ * Mantiene el contrato de apiRequest: devuelve null si falla la primera
+ * página (para que siga funcionando el fallback a los MOCK_*). Si falla una
+ * página posterior devuelve lo que alcanzó a traer, avisando por consola —
+ * romper aquí dejaría al Dashboard con el spinner colgado, porque App.tsx
+ * llama a getInventory() sin try/catch.
+ */
+async function fetchAllPages<T = any>(baseUrl: string): Promise<T[] | null> {
+    const all: T[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+        const sep = baseUrl.includes('?') ? '&' : '?';
+        const url = `${baseUrl}${sep}maxSize=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`;
+        const data = await apiRequest<any>(url);
+
+        if (!data || !Array.isArray(data.list)) {
+            if (page === 0) return null;
+            console.warn(`Paginación interrumpida en ${baseUrl} (página ${page}). Se devuelven ${all.length} registros parciales.`);
+            return all;
+        }
+
+        all.push(...data.list);
+        if (data.list.length < PAGE_SIZE) break;
+        if (typeof data.total === 'number' && all.length >= data.total) break;
+    }
+    return all;
 }
 
 // --- CACHÉ EN MEMORIA -------------------------------------------------------
@@ -294,9 +370,9 @@ export const uploadInventoryImage = async (base64Image: string): Promise<string 
 
 export const getInventory = async (): Promise<InventoryItem[]> => cached('inventory', async () => {
   // Use any to allow robust mapping inside
-  const data = await apiRequest<any>(ENDPOINTS.ITEMS);
-  if (data && Array.isArray(data.list)) {
-      return data.list.map(mapApiItemToInventory);
+  const list = await fetchAllPages<any>(ENDPOINTS.ITEMS);
+  if (list) {
+      return list.map(mapApiItemToInventory);
   }
   return MOCK_INVENTORY;
 });
@@ -330,16 +406,10 @@ export const addInventoryItem = async (item: Omit<InventoryItem, 'id' | 'history
       deleted: false
   };
 
-  const result = await apiRequest<InventoryItem>(ENDPOINTS.ITEMS, 'POST', newItemPayload);
-
-  if (!result) {
-      console.info("Simulating CREATE success");
-      return { ...item, foto: finalFotoName, id: `local-${Date.now()}`, history: [] } as InventoryItem;
-  }
-  return result;
+  return apiWrite<InventoryItem>(ENDPOINTS.ITEMS, 'POST', newItemPayload);
 };
 
-export const updateInventoryItem = async (id: string, updates: Partial<InventoryItem>): Promise<InventoryItem | null> => {
+export const updateInventoryItem = async (id: string, updates: Partial<InventoryItem>): Promise<InventoryItem> => {
   // Map updates to API structure
   const apiUpdates: any = { ...updates };
   
@@ -371,28 +441,22 @@ export const updateInventoryItem = async (id: string, updates: Partial<Inventory
   if (apiUpdates.fotoName === '') apiUpdates.fotoName = null;
   if (apiUpdates.fechaCompra === '') apiUpdates.fechaCompra = null;
   
-  const result = await apiRequest<InventoryItem>(`${ENDPOINTS.ITEMS}/${id}`, 'PUT', apiUpdates);
-  
-  if (!result) {
-      console.info("Simulating UPDATE success");
-      return { id, ...updates } as InventoryItem;
-  }
-  return result;
+  return apiWrite<InventoryItem>(`${ENDPOINTS.ITEMS}/${id}`, 'PUT', apiUpdates);
 };
 
 export const deleteInventoryItem = async (id: string): Promise<void> => {
-  await apiRequest(`${ENDPOINTS.ITEMS}/${id}`, 'DELETE');
+  await apiWrite(`${ENDPOINTS.ITEMS}/${id}`, 'DELETE');
 };
 
-export const unassignInventoryItem = async (id: string, _comment: string): Promise<InventoryItem | null> => {
+export const unassignInventoryItem = async (id: string): Promise<InventoryItem | null> => {
   // Send null to clear assignment
   const updates = {
       assignedEmployeeId: null,
       assignedEmployeeName: null
   };
-  
-  await apiRequest(`${ENDPOINTS.ITEMS}/${id}`, 'PUT', updates);
-  
+
+  await apiWrite(`${ENDPOINTS.ITEMS}/${id}`, 'PUT', updates);
+
   // Refresh
   const items = await getInventory();
   return items.find(i => i.id === id) || null;
@@ -401,30 +465,28 @@ export const unassignInventoryItem = async (id: string, _comment: string): Promi
 // --- Provider Logic ---
 
 export const getProviders = async (): Promise<Provider[]> => cached('providers', async () => {
-  const data = await apiRequest<ApiResponse<Provider>>(ENDPOINTS.PROVIDERS);
-  if (data && Array.isArray(data.list)) {
-      return data.list;
+  const list = await fetchAllPages<Provider>(ENDPOINTS.PROVIDERS);
+  if (list) {
+      return list;
   }
   return MOCK_PROVIDERS;
 });
 
 export const addProvider = async (provider: Omit<Provider, 'id'>): Promise<Provider> => {
-  const result = await apiRequest<Provider>(ENDPOINTS.PROVIDERS, 'POST', provider);
-  if (!result) return { ...provider, id: `prov-${Date.now()}` };
-  return result;
+  return apiWrite<Provider>(ENDPOINTS.PROVIDERS, 'POST', provider);
 };
 
 export const deleteProvider = async (id: string): Promise<void> => {
-  await apiRequest(`${ENDPOINTS.PROVIDERS}/${id}`, 'DELETE');
+  await apiWrite(`${ENDPOINTS.PROVIDERS}/${id}`, 'DELETE');
 };
 
 // --- Employee Logic ---
 
 export const getEmployees = async (): Promise<Employee[]> => cached('employees', async () => {
-  const data = await apiRequest<ApiResponse<any>>(ENDPOINTS.EMPLOYEES);
-  if (data && Array.isArray(data.list)) {
+  const list = await fetchAllPages<any>(ENDPOINTS.EMPLOYEES);
+  if (list) {
       // Map API employee structure if different
-      return data.list.map((e: any) => ({
+      return list.map((e: any) => ({
           id: e.id,
           name: e.name || e.nombre || 'Unknown',
           equipo: e.equipo || e.departamento || 'General'
@@ -434,20 +496,14 @@ export const getEmployees = async (): Promise<Employee[]> => cached('employees',
 });
 
 export const addEmployee = async (name: string, equipo: string): Promise<Employee> => {
-    const newEmp = { name, equipo };
-    const result = await apiRequest<Employee>(ENDPOINTS.EMPLOYEES, 'POST', newEmp);
-    if (!result) return { id: `emp-${Date.now()}`, name, equipo };
-    return result;
+    return apiWrite<Employee>(ENDPOINTS.EMPLOYEES, 'POST', { name, equipo });
 };
 
 // --- PAÑOL (LOAN) Logic ---
 
 export const getLoans = async (): Promise<Loan[]> => cached('loans', async () => {
-  const data = await apiRequest<ApiResponse<Loan>>(ENDPOINTS.LOANS);
-  if (data && Array.isArray(data.list)) {
-      return data.list;
-  }
-  return [];
+  const list = await fetchAllPages<Loan>(ENDPOINTS.LOANS);
+  return list ?? [];
 });
 
 export const getLoanItems = async (loanId: string): Promise<InventoryItem[]> => {
@@ -470,13 +526,13 @@ export const getLoanItems = async (loanId: string): Promise<InventoryItem[]> => 
 
 export const createLoanItems = async (itemIds: string[], loanId: string) => {
     const ids = {"ids":itemIds};
-    await apiRequest(`${ENDPOINTS.LOANS}/${loanId}/equipos`, 'POST', ids);
+    await apiWrite(`${ENDPOINTS.LOANS}/${loanId}/equipos`, 'POST', ids);
 };
 
 // This is for editing loan structure (removing items from a list), NOT for returns
 export const removeLoanItems = async (loanId: string, itemIds: string[]) => {
     const payload = { ids: itemIds };
-    await apiRequest(`${ENDPOINTS.LOANS}/${loanId}/equipos`, 'DELETE', payload);
+    await apiWrite(`${ENDPOINTS.LOANS}/${loanId}/equipos`, 'DELETE', payload);
 };
 
 export const createLoan = async (loanData: any): Promise<Loan> => {
@@ -508,8 +564,8 @@ export const createLoan = async (loanData: any): Promise<Loan> => {
     fechaPrestamo: fechaPrestamo // Send the custom start date
   };
 
-  const savedLoan = await apiRequest<Loan>(ENDPOINTS.LOANS, 'POST', newLoanHeader);
-  const loanId = savedLoan?.id || `loan-${Date.now()}`;
+  const savedLoan = await apiWrite<Loan>(ENDPOINTS.LOANS, 'POST', newLoanHeader);
+  const loanId = savedLoan.id;
 
   // Add items via sub-resource
   if (loanData.itemIds && loanData.itemIds.length > 0) {
@@ -526,7 +582,7 @@ export const createLoan = async (loanData: any): Promise<Loan> => {
       await Promise.all(updatePromises);
   }
 
-  return savedLoan || ({ ...newLoanHeader, id: loanId } as Loan);
+  return savedLoan;
 };
 
 export const updateLoan = async (id: string, updates: Partial<Loan> & { itemIds?: string[] }): Promise<Loan | null> => {
@@ -543,7 +599,7 @@ export const updateLoan = async (id: string, updates: Partial<Loan> & { itemIds?
     // Remove itemIds from header payload to avoid backend confusion
     delete payload.itemIds;
     
-    await apiRequest(`${ENDPOINTS.LOANS}/${id}`, 'PUT', payload);
+    await apiWrite(`${ENDPOINTS.LOANS}/${id}`, 'PUT', payload);
     
     // 2. Handle Items Diff (Add vs Remove)
     if (updates.itemIds) {
@@ -584,7 +640,7 @@ export const returnLoanItems = async (loanId: string, itemIdsToReturn: string[])
             equipoId: itemId,
             devuelto: 1
         };
-        return apiRequest(ENDPOINTS.LOAN_RETURN, 'POST', payload);
+        return apiWrite(ENDPOINTS.LOAN_RETURN, 'POST', payload);
     });
 
     await Promise.all(promises);
@@ -593,10 +649,10 @@ export const returnLoanItems = async (loanId: string, itemIdsToReturn: string[])
 // --- ASSIGNMENT Logic ---
 
 export const getAssignments = async (): Promise<Assignment[]> => cached('assignments', async () => {
-  const data = await apiRequest<ApiResponse<any>>(ENDPOINTS.ASSIGNMENTS);
-  if (data && Array.isArray(data.list)) {
+  const list = await fetchAllPages<any>(ENDPOINTS.ASSIGNMENTS);
+  if (list) {
       // Map API fields if needed (specifically 'area' to 'equipo' to match UI)
-      return data.list.map((item: any) => ({
+      return list.map((item: any) => ({
           ...item,
           equipo: item.area || item.equipo // Map area back to equipo
       }));
@@ -615,19 +671,19 @@ export const getAssignmentItems = async (assignmentId: string): Promise<Inventor
 };
 
 export const deleteAssignmentItems = async (assignmentId: string): Promise<void> => {
-    await apiRequest(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'DELETE');
+    await apiWrite(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'DELETE');
 };
 
 export const removeAssignmentItems = async (assignmentId: string, itemIds: string[]) => {
     // User spec: {"ids": ["id1", "id2"]}
     const payload = { ids: itemIds };
-    await apiRequest(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'DELETE', payload);
+    await apiWrite(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'DELETE', payload);
 };
 
 export const createAssignmentEquipo = async (itemIds: string[], assignmentId: string) => {
     // The API expects just the list of IDs according to instruction
     const ids = {"ids":itemIds};
-    await apiRequest(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'POST',  ids );
+    await apiWrite(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'POST',  ids );
 };
 
 export const createAssignment = async (data: any): Promise<Assignment> => {
@@ -648,15 +704,9 @@ export const createAssignment = async (data: any): Promise<Assignment> => {
   // FIX: Remove itemIds from header creation payload to avoid backend rejection/confusion
   delete (newAssignment as any).itemIds;
   
-  const savedAssignment = await apiRequest<Assignment>(ENDPOINTS.ASSIGNMENTS, 'POST', newAssignment);
-
-  // Fallback ID generation if API failed/mocked
-  const finalAssignment = savedAssignment || { ...newAssignment, id: `asn-${Date.now()}` };
-  
-  // Update Inventory Items Status (Side Effect - though backend likely handles this via the items relation)
-  // We do not do it here manually to avoid race conditions with createAssignmentEquipo
-  
-  return finalAssignment;
+  // Los equipos de la asignación se enlazan aparte (createAssignmentEquipo),
+  // no aquí, para no competir con esa llamada.
+  return apiWrite<Assignment>(ENDPOINTS.ASSIGNMENTS, 'POST', newAssignment);
 };
 
 export const updateAssignment = async (id: string, updates: Partial<Assignment> & { itemIds?: string[] }): Promise<Assignment | null> => {
@@ -675,7 +725,7 @@ export const updateAssignment = async (id: string, updates: Partial<Assignment> 
   // Remove itemIds from header payload to avoid confusion
   delete (payload as any).itemIds;
 
-  await apiRequest(`${ENDPOINTS.ASSIGNMENTS}/${id}`, 'PUT', payload);
+  await apiWrite(`${ENDPOINTS.ASSIGNMENTS}/${id}`, 'PUT', payload);
 
   // 2. Handle Items Diff (Add vs Remove)
   if (updates.itemIds) {

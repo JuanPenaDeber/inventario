@@ -16,19 +16,40 @@ import {
     ShieldCheck,
     FileText
 } from 'lucide-react';
-import { InventoryItem, Loan, Employee } from '../types';
-import { getInventory, getLoans, createLoan, returnLoanItems, updateLoan, getEmployees, addEmployee, getLoanItems } from '../services/inventoryService';
-import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
-import { getLogoUrl } from '../services/photoServer';
-import DateRangeBar from './DateRangeBar';
+import { InventoryItem, Loan, Employee } from '@/types';
+import { getInventory, getLoans, createLoan, returnLoanItems, updateLoan, getEmployees, addEmployee, getLoanItems, getInventoryErrorMessage } from '@/shared/api/inventoryService';
+import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '@/shared/utils/reportUtils';
+import { getLogoUrl } from '@/shared/api/photoServer';
+import DateRangeBar from '@/shared/components/DateRangeBar';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 
 const LoanManager: React.FC = () => {
     const [viewMode, setViewMode] = useState<'dashboard' | 'create' | 'edit'>('dashboard');
-    const [loans, setLoans] = useState<Loan[]>([]);
-    const [inventory, setInventory] = useState<InventoryItem[]>([]);
-    const [employees, setEmployees] = useState<Employee[]>([]);
+
+    const {
+        data: { loans, inventory, employees },
+        setData,
+        loading,
+        refresh,
+    } = useAsyncData<{ loans: Loan[]; inventory: InventoryItem[]; employees: Employee[] }>(
+        async () => {
+            const [lData, iData, eData] = await Promise.all([getLoans(), getInventory(), getEmployees()]);
+            return { loans: lData, inventory: iData, employees: eData };
+        },
+        { loans: [], inventory: [], employees: [] },
+        { errorMessage: 'No se pudieron cargar los préstamos.' },
+    );
+
+    const setEmployees = (update: (prev: Employee[]) => Employee[]) =>
+        setData((prev) => ({ ...prev, employees: update(prev.employees) }));
+
     const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
+    // Distinto de `loading` (que es la carga de datos): esto marca una
+    // operación de guardado/devolución en curso.
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
 
     // Detail State
     const [currentLoanItems, setCurrentLoanItems] = useState<InventoryItem[]>([]);
@@ -55,9 +76,6 @@ const LoanManager: React.FC = () => {
     // Return State
     const [itemsToReturn, setItemsToReturn] = useState<Set<string>>(new Set());
 
-    useEffect(() => {
-        refreshData();
-    }, []);
 
     // Fetch Items on selection
     useEffect(() => {
@@ -76,17 +94,8 @@ const LoanManager: React.FC = () => {
     }, [selectedLoanId]);
 
     const refreshData = async () => {
-        setLoading(true);
-        const [lData, iData, eData] = await Promise.all([
-            getLoans(),
-            getInventory(),
-            getEmployees()
-        ]);
-        setLoans(lData);
-        setInventory(iData);
-        setEmployees(eData);
+        await refresh();
         setItemsToReturn(new Set());
-        setLoading(false);
     };
 
     // --- Logic for Create/Edit Form ---
@@ -149,11 +158,11 @@ const LoanManager: React.FC = () => {
     const handleSaveLoan = async (e: React.FormEvent) => {
         e.preventDefault();
         if (selectedItemIds.size === 0) {
-            alert("Please select at least one item.");
+            alert("Seleccione al menos un equipo.");
             return;
         }
 
-        setLoading(true);
+        setSaving(true);
         const selectedEmp = employees.find(e => e.id === solicitanteId);
         const nameToSave = selectedEmp ? selectedEmp.name : "Unknown";
 
@@ -176,18 +185,24 @@ const LoanManager: React.FC = () => {
             itemIds: Array.from(selectedItemIds) as string[]
         };
 
-        if (viewMode === 'edit' && formId) {
-            // Passing itemIds here triggers the new Diff logic in the service
-            await updateLoan(formId, loanData);
-            setSelectedLoanId(formId);
-        } else {
-            const newLoan = await createLoan(loanData);
-            setSelectedLoanId(newLoan.id);
-        }
+        try {
+            if (viewMode === 'edit' && formId) {
+                // Passing itemIds here triggers the new Diff logic in the service
+                await updateLoan(formId, loanData);
+                setSelectedLoanId(formId);
+            } else {
+                const newLoan = await createLoan(loanData);
+                setSelectedLoanId(newLoan.id);
+            }
 
-        resetForm();
-        await refreshData();
-        setViewMode('dashboard');
+            resetForm();
+            await refreshData();
+            setViewMode('dashboard');
+        } catch (err) {
+            setSaveError(getInventoryErrorMessage(err, 'No se pudo guardar el préstamo.'));
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleEditStart = () => {
@@ -254,7 +269,7 @@ const LoanManager: React.FC = () => {
     }, [loans, loanSearch, startDate, endDate]);
 
     /** Exporta a Excel (.xlsx) los préstamos que se están mostrando. */
-    const handleExportLoans = () => {
+    const handleExportLoans = async () => {
         const header = [
             'ID', 'Referencia', 'Área', 'Solicitante', 'Entregado por',
             'Fecha préstamo', 'Devolución esperada', 'Fecha devolución',
@@ -272,7 +287,7 @@ const LoanManager: React.FC = () => {
             l.status || '',
             l.description || l.notes || '',
         ]);
-        downloadXlsx(
+        await downloadXlsx(
             `prestamos_${rangeSuffix(startDate, endDate)}.xlsx`,
             'Prestamos',
             [header, ...rows],
@@ -304,11 +319,21 @@ const LoanManager: React.FC = () => {
         });
     };
 
-    const handlePartialReturn = async () => {
+    const handlePartialReturn = () => {
         if (!selectedLoanId || itemsToReturn.size === 0) return;
-        if (window.confirm(`¿Registrar devolución de ${itemsToReturn.size} equipos seleccionados?`)) {
-            setLoading(true);
+        setConfirmState({
+            message: `¿Registrar la devolución de ${itemsToReturn.size} equipo(s) seleccionado(s)?`,
+            confirmLabel: 'Registrar devolución',
+            onConfirm: doPartialReturn,
+        });
+    };
 
+    const doPartialReturn = async () => {
+        setConfirmState(null);
+        if (!selectedLoanId) return;
+        setSaving(true);
+        setSaveError(null);
+        try {
             // 1. Process Item Returns
             await returnLoanItems(selectedLoanId, Array.from(itemsToReturn));
 
@@ -334,9 +359,11 @@ const LoanManager: React.FC = () => {
 
             // Refresh global data to update status in list
             await refreshData();
-
             setItemsToReturn(new Set());
-            setLoading(false);
+        } catch (err) {
+            setSaveError(getInventoryErrorMessage(err, 'No se pudo registrar la devolución.'));
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -610,10 +637,10 @@ const LoanManager: React.FC = () => {
                                     </div>
                                     <button
                                         type="submit"
-                                        disabled={loading || selectedItemIds.size === 0}
+                                        disabled={saving || selectedItemIds.size === 0}
                                         className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-medium transition-all shadow-lg shadow-orange-500/20"
                                     >
-                                        {loading ? 'Procesando...' : (viewMode === 'edit' ? 'Guardar Cambios' : 'Confirmar Préstamo')}
+                                        {saving ? 'Procesando...' : (viewMode === 'edit' ? 'Guardar Cambios' : 'Confirmar Préstamo')}
                                     </button>
                                 </div>
                             </form>
@@ -825,7 +852,7 @@ const LoanManager: React.FC = () => {
                                         <div className="mt-6 flex justify-end">
                                             <button
                                                 onClick={handlePartialReturn}
-                                                disabled={loading || itemsToReturn.size === 0}
+                                                disabled={saving || itemsToReturn.size === 0}
                                                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                                             >
                                                 <CheckCircle size={18} />
@@ -845,6 +872,15 @@ const LoanManager: React.FC = () => {
                 </div>
                 </>
             )}
+
+            {saveError && (
+                <div className="fixed bottom-6 right-6 z-40 max-w-md flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-lg print:hidden">
+                    <span>{saveError}</span>
+                    <button onClick={() => setSaveError(null)} aria-label="Cerrar aviso" className="shrink-0 font-medium">×</button>
+                </div>
+            )}
+
+            <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} busy={saving} />
         </div>
     );
 };

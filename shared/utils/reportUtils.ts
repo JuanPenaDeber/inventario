@@ -1,8 +1,14 @@
 // =============================================================================
 // Utilidades compartidas para filtrar por rango de fechas y exportar a Excel.
-// Las usan Incidencias, Pañol/Préstamos y Asignaciones.
+// Las usan Incidencias, Pañol/Préstamos, Asignaciones y Compras.
+//
+// NO importar xlsx aquí de forma estática: pesa ~325 KB y nueve archivos
+// importan este módulo (entre ellos DateRangeBar, que solo usa dos helpers de
+// fecha). Con el import arriba, abrir cualquier módulo descargaba la librería
+// de Excel completa aunque el usuario nunca exportara nada. Ahora se carga
+// dentro de downloadXlsx, es decir solo al hacer clic en "Exportar Excel",
+// que además ya implica una espera.
 // =============================================================================
-import * as XLSX from 'xlsx';
 
 /** Fecha como YYYY-MM-DD (formato de los <input type="date">). */
 export function toISODate(date: Date): string {
@@ -79,6 +85,26 @@ export function formatDate(value?: string | null): string {
 }
 
 /**
+ * Fecha + hora legible (es-BO). Devuelve '—' si no hay valor o no es válido.
+ *
+ * Vivía duplicada en incidentsService.ts y en PurchaseRequestManager.tsx, y las
+ * dos copias además usaban locales distintos (es-EC y es-BO), así que la misma
+ * fecha se veía diferente según el módulo.
+ */
+export function formatDateTime(iso?: string | null): string {
+    if (!iso) return '—';
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleString('es-BO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+/**
  * Genera y descarga un archivo Excel (.xlsx) de verdad.
  *
  * Se usa .xlsx y no CSV a propósito: el CSV se abre mal en Excel en español
@@ -88,12 +114,16 @@ export function formatDate(value?: string | null): string {
  * @param rows Primera fila = encabezados; el resto, los datos.
  * @param colWidths Ancho de cada columna, en caracteres (opcional).
  */
-export function downloadXlsx(
+export async function downloadXlsx(
     fileName: string,
     sheetName: string,
     rows: (string | number)[][],
     colWidths?: number[],
-): void {
+): Promise<void> {
+    // Carga diferida: la librería solo llega al navegador cuando alguien
+    // exporta de verdad (ver la nota de la cabecera del archivo).
+    const XLSX = await import('xlsx');
+
     const sheet = XLSX.utils.aoa_to_sheet(rows);
 
     if (colWidths) {

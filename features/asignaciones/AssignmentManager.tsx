@@ -14,7 +14,7 @@ import {
     ArrowLeft,
     Image as ImageIcon
 } from 'lucide-react';
-import { InventoryItem, Assignment, Employee } from '../types';
+import { InventoryItem, Assignment, Employee } from '@/types';
 import {
     getInventory,
     getAssignments,
@@ -23,24 +23,38 @@ import {
     getEmployees,
     createAssignmentEquipo,
     getAssignmentItems,
-    updateInventoryItem
-} from '../services/inventoryService';
-import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
-import { getLogoUrl, getPhotoUrl } from '../services/photoServer';
-import DateRangeBar from './DateRangeBar';
+    updateInventoryItem,
+    getInventoryErrorMessage
+} from '@/shared/api/inventoryService';
+import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '@/shared/utils/reportUtils';
+import { getLogoUrl, getPhotoUrl } from '@/shared/api/photoServer';
+import DateRangeBar from '@/shared/components/DateRangeBar';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
 
 const AssignmentManager: React.FC = () => {
     const [viewMode, setViewMode] = useState<'dashboard' | 'form'>('dashboard');
-    const [assignments, setAssignments] = useState<Assignment[]>([]);
-    const [inventory, setInventory] = useState<InventoryItem[]>([]);
-    const [employees, setEmployees] = useState<Employee[]>([]);
+
+    const {
+        data: { assignments, inventory, employees },
+        loading,
+        refresh: refreshData,
+    } = useAsyncData<{ assignments: Assignment[]; inventory: InventoryItem[]; employees: Employee[] }>(
+        async () => {
+            const [aData, iData, eData] = await Promise.all([getAssignments(), getInventory(), getEmployees()]);
+            return { assignments: aData, inventory: iData, employees: eData };
+        },
+        { assignments: [], inventory: [], employees: [] },
+        { errorMessage: 'No se pudieron cargar las asignaciones.' },
+    );
     const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
 
     // Detail State
     const [currentAssignmentItems, setCurrentAssignmentItems] = useState<InventoryItem[]>([]);
     const [loadingItems, setLoadingItems] = useState(false);
 
-    const [loading, setLoading] = useState(false);
+    // Distinto de `loading` (carga de datos): marca un guardado en curso.
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     // Form State
     const [isEditing, setIsEditing] = useState(false);
@@ -62,9 +76,6 @@ const AssignmentManager: React.FC = () => {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
-    useEffect(() => {
-        refreshData();
-    }, []);
 
     // Fetch items when selection changes
     useEffect(() => {
@@ -80,19 +91,6 @@ const AssignmentManager: React.FC = () => {
         };
         fetchItems();
     }, [selectedAssignmentId]);
-
-    const refreshData = async () => {
-        setLoading(true);
-        const [aData, iData, eData] = await Promise.all([
-            getAssignments(),
-            getInventory(),
-            getEmployees()
-        ]);
-        setAssignments(aData);
-        setInventory(iData);
-        setEmployees(eData);
-        setLoading(false);
-    };
 
     const availableItems = useMemo(() => {
         return inventory.filter(i => {
@@ -136,7 +134,7 @@ const AssignmentManager: React.FC = () => {
             return;
         }
 
-        setLoading(true);
+        setSaving(true);
         const data = {
             name,
             employeeId,
@@ -150,6 +148,7 @@ const AssignmentManager: React.FC = () => {
             itemIds: Array.from(selectedItemIds) as string[]
         };
 
+        try {
         if (isEditing && formId) {
             // 1. Update Assignment Header and Relations
             await updateAssignment(formId, data);
@@ -188,6 +187,11 @@ const AssignmentManager: React.FC = () => {
         resetForm();
         await refreshData(); // Refresh the dashboard list to show updated values
         setViewMode('dashboard');
+        } catch (err) {
+            setSaveError(getInventoryErrorMessage(err, 'No se pudo guardar la asignación.'));
+        } finally {
+            setSaving(false);
+        }
     };
 
     const resetForm = () => {
@@ -245,7 +249,7 @@ const AssignmentManager: React.FC = () => {
     }, [assignments, assignmentSearch, startDate, endDate]);
 
     /** Exporta a Excel (.xlsx) las asignaciones que se están mostrando. */
-    const handleExportAssignments = () => {
+    const handleExportAssignments = async () => {
         const header = [
             'ID', 'Empleado', 'Área / Equipo', 'Fecha',
             'Autorizado por', 'Nº de equipos', 'Descripción',
@@ -259,7 +263,7 @@ const AssignmentManager: React.FC = () => {
             a.itemIds ? a.itemIds.length : 0,
             a.description || '',
         ]);
-        downloadXlsx(
+        await downloadXlsx(
             `asignaciones_${rangeSuffix(startDate, endDate)}.xlsx`,
             'Asignaciones',
             [header, ...rows],
@@ -470,8 +474,8 @@ const AssignmentManager: React.FC = () => {
                                 </div>
 
                                 <div className="pt-4 border-t border-slate-100 mt-4">
-                                    <button type="submit" disabled={loading || selectedItemIds.size === 0} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white py-2.5 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition-all">
-                                        {loading ? 'Guardando...' : (isEditing ? 'Guardar Cambios' : 'Generar Acta de Entrega')}
+                                    <button type="submit" disabled={saving || selectedItemIds.size === 0} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white py-2.5 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition-all">
+                                        {saving ? 'Guardando...' : (isEditing ? 'Guardar Cambios' : 'Generar Acta de Entrega')}
                                     </button>
                                 </div>
                             </form>
@@ -634,6 +638,13 @@ const AssignmentManager: React.FC = () => {
                     </div>
                 </div>
                 </>
+            )}
+
+            {saveError && (
+                <div className="fixed bottom-6 right-6 z-40 max-w-md flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-lg print:hidden">
+                    <span>{saveError}</span>
+                    <button onClick={() => setSaveError(null)} aria-label="Cerrar aviso" className="shrink-0 font-medium">×</button>
+                </div>
             )}
         </div>
     );

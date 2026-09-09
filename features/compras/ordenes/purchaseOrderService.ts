@@ -44,14 +44,16 @@
 // las constantes ENTITY/LINES_SUBRESOURCE/FIELDS/LINE_FIELDS y las funciones
 // mapOrder/mapLine/buildOrderPayload/buildLinePayload de este archivo.
 //
-// IMPORTANTE: No se crean equipos (CEquipo) automáticamente al recibir una
-// orden. El campo PurchaseOrderLine.createdItemId queda reservado para ese
-// enlace futuro, pero la creación real debe habilitarse cuando el contrato
-// de creación de equipos a partir de una recepción esté confirmado.
+// Al registrar una recepción, cada unidad recién recibida (la diferencia
+// contra lo que ya estaba marcado como recibido) crea un equipo nuevo en el
+// Inventario (ver receivePurchaseOrder) — sin serie ni ubicación real todavía,
+// eso se completa a mano desde el módulo de Inventario una vez que el equipo
+// físico llega y se etiqueta.
 // =============================================================================
 
-import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus } from '../types';
-import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, round2 } from './espoClient';
+import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus } from '@/types';
+import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, createEspoList, round2 } from '@/shared/api/espoClient';
+import { addInventoryItem, invalidateCache as invalidateInventoryCache } from '@/shared/api/inventoryService';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -66,6 +68,15 @@ const ENTITY = import.meta.env.VITE_PURCHASE_ORDER_ENTITY ?? 'COrdenCompra';
 const LINES_SUBRESOURCE =
   import.meta.env.VITE_PURCHASE_ORDER_LINES_SUBRESOURCE ?? 'lineas';
 
+// POST/PUT/DELETE contra el sub-recurso anidado (/ENTITY/{id}/LINES_SUBRESOURCE)
+// solo relacionan/desrelacionan ids existentes en EspoCRM — no crean ni editan
+// un registro con datos completos (confirmado contra el EspoCRM real). Para
+// crear/editar/borrar líneas se usa la entidad hija directo, con su campo de
+// enlace al padre. El GET del sub-recurso (listar) sí funciona tal cual.
+const LINE_ENTITY = import.meta.env.VITE_PURCHASE_ORDER_LINE_ENTITY ?? 'COrdenCompraDetalle';
+const LINE_PARENT_FIELD =
+  import.meta.env.VITE_PURCHASE_ORDER_LINE_PARENT_FIELD ?? 'cOrdenCompraId';
+
 // % de impuesto por defecto al crear una orden nueva. Editable en el formulario.
 export const DEFAULT_TAX_RATE_PERCENT = Number(
   import.meta.env.VITE_PURCHASE_ORDER_TAX_RATE ?? 13,
@@ -74,11 +85,7 @@ export const DEFAULT_TAX_RATE_PERCENT = Number(
 // Monedas sugeridas para el desplegable (campo Varchar en EspoCRM: no limita).
 export const CURRENCIES = ['BOB', 'USD'] as const;
 
-// Cantidad de resultados a traer en el listado.
-const LIST_PAGE_SIZE = 200;
-// Tope de páginas al recorrer el listado completo (ver getPurchaseOrders):
-// evita un bucle indefinido si EspoCRM devolviera siempre "list" lleno.
-const MAX_LIST_PAGES = 25; // 25 * 200 = 5000 órdenes como máximo
+// La paginación de listados vive en espoClient.ts (createEspoList).
 
 // Mapeo de campos del frontend -> nombres de campo asumidos en EspoCRM.
 const FIELDS = {
@@ -192,6 +199,7 @@ export function getPurchaseOrderErrorMessage(error: unknown, fallback: string): 
 }
 
 const espoFetch = createEspoFetch(PURCHASE_ORDERS_API_URL);
+const listAll = createEspoList(espoFetch);
 
 // --- CÁLCULOS (compartidos entre el servicio y el formulario) --------------
 
@@ -352,23 +360,7 @@ async function cachedList(fetcher: () => Promise<PurchaseOrder[]>): Promise<Purc
 /** Lista todas las órdenes de compra (orden descendente por fecha de creación). */
 export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
   return cachedList(async () => {
-    // Recorre todas las páginas: con maxSize fijo, una sola página se
-    // quedaría corta (y en silencio) apenas hubiera más de LIST_PAGE_SIZE
-    // órdenes registradas.
-    const all: any[] = [];
-    for (let page = 0; page < MAX_LIST_PAGES; page++) {
-      const params = new URLSearchParams({
-        maxSize: String(LIST_PAGE_SIZE),
-        offset: String(page * LIST_PAGE_SIZE),
-        orderBy: 'createdAt',
-        order: 'desc',
-      });
-      const res = await espoFetch(`/${ENTITY}?${params.toString()}`);
-      const data = await res.json();
-      const list = data.list ?? [];
-      all.push(...list);
-      if (list.length < LIST_PAGE_SIZE) break;
-    }
+    const all = await listAll(`/${ENTITY}`, { orderBy: 'createdAt', order: 'desc' });
     return all.map((raw: any) => mapOrder(raw));
   });
 }
@@ -438,9 +430,9 @@ export async function createPurchaseOrder(input: CreatePurchaseOrderInput): Prom
   // creación en lote de líneas (contrato no confirmado).
   const savedLines: PurchaseOrderLine[] = [];
   for (const line of lines) {
-    const lineRes = await espoFetch(`/${ENTITY}/${orderId}/${LINES_SUBRESOURCE}`, {
+    const lineRes = await espoFetch(`/${LINE_ENTITY}`, {
       method: 'POST',
-      body: JSON.stringify(buildLinePayload(line)),
+      body: JSON.stringify({ ...buildLinePayload(line), [LINE_PARENT_FIELD]: orderId }),
     });
     savedLines.push(mapLine(await lineRes.json()));
   }
@@ -464,18 +456,18 @@ async function syncPurchaseOrderLines(orderId: string, newLines: PurchaseOrderLi
   const toCreate = newLines.filter((l) => !l.id);
 
   for (const line of toDelete) {
-    await espoFetch(`/${ENTITY}/${orderId}/${LINES_SUBRESOURCE}/${line.id}`, { method: 'DELETE' });
+    await espoFetch(`/${LINE_ENTITY}/${line.id}`, { method: 'DELETE' });
   }
   for (const line of toUpdate) {
-    await espoFetch(`/${ENTITY}/${orderId}/${LINES_SUBRESOURCE}/${line.id}`, {
+    await espoFetch(`/${LINE_ENTITY}/${line.id}`, {
       method: 'PUT',
       body: JSON.stringify(buildLinePayload(line)),
     });
   }
   for (const line of toCreate) {
-    await espoFetch(`/${ENTITY}/${orderId}/${LINES_SUBRESOURCE}`, {
+    await espoFetch(`/${LINE_ENTITY}`, {
       method: 'POST',
-      body: JSON.stringify(buildLinePayload(line)),
+      body: JSON.stringify({ ...buildLinePayload(line), [LINE_PARENT_FIELD]: orderId }),
     });
   }
 }
@@ -561,9 +553,11 @@ export async function cancelPurchaseOrder(id: string): Promise<PurchaseOrder | n
  * líneas se completan, el estado de la orden se mantiene (recepción parcial)
  * para que quede claro que aún falta mercadería por llegar.
  *
- * NO crea equipos (CEquipo) automáticamente: ver nota de contrato pendiente
- * al inicio del archivo. `PurchaseOrderLine.createdItemId` queda preparado
- * para ese enlace cuando se confirme cómo debe crearse el equipo.
+ * Por cada línea, la diferencia entre `quantityReceived` (nuevo total) y lo
+ * que ya estaba recibido antes se refleja como esa cantidad de equipos nuevos
+ * en el Inventario (uno por unidad, sin serie/ubicación real todavía — eso se
+ * completa después a mano). Así una recepción parcial no duplica equipos ya
+ * creados en una recepción anterior de la misma línea.
  *
  * Solo se puede recibir una orden en estado APROBADA (la recepción es lo que
  * la mueve a RECIBIDA; no tiene sentido recibir mercadería de una orden que
@@ -597,11 +591,36 @@ export async function receivePurchaseOrder(
   }
 
   for (const receipt of receipts) {
-    await espoFetch(`/${ENTITY}/${orderId}/${LINES_SUBRESOURCE}/${receipt.lineId}`, {
+    await espoFetch(`/${LINE_ENTITY}/${receipt.lineId}`, {
       method: 'PUT',
       body: JSON.stringify({ [LINE_FIELDS.QUANTITY_RECEIVED]: receipt.quantityReceived }),
     });
   }
+
+  // Cada unidad recién llegada (delta contra lo ya recibido antes de esta
+  // llamada) se da de alta como un equipo en el Inventario.
+  const receivedToday = new Date().toISOString().slice(0, 10);
+  let createdAnyItem = false;
+  for (const receipt of receipts) {
+    const line = linesById.get(receipt.lineId)!;
+    const newlyReceived = receipt.quantityReceived - line.quantityReceived;
+    for (let i = 0; i < newlyReceived; i++) {
+      await addInventoryItem({
+        name: line.description,
+        category: line.category || 'General',
+        serie: '',
+        status: 'Activo',
+        condition: 'Funcional',
+        location: 'Por ubicar',
+        precio: line.unitPrice,
+        providerId: current.providerId,
+        fechaCompra: receivedToday,
+        description: `Ingresado automáticamente al recibir la orden de compra ${current.reference}.`,
+      });
+      createdAnyItem = true;
+    }
+  }
+  if (createdAnyItem) invalidateInventoryCache('inventory');
 
   const updatedLines = await getPurchaseOrderLines(orderId);
   const fullyReceived =

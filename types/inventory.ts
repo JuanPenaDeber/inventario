@@ -19,3 +19,10 @@ export interface InventoryItem {
   fechaDevolucion?: string | null;
   history: MovementHistory[];
 }
+
+/**
+ * Lo que envía el formulario de inventario al guardar: los campos editables,
+ * más el `id` solo cuando se está editando un equipo existente. `history` lo
+ * arma el backend, no el formulario.
+ */
+export type InventoryItemInput = Omit<InventoryItem, 'id' | 'history'> & { id?: string };

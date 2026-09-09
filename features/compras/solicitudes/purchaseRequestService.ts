@@ -86,10 +86,10 @@
 // buildLinePayload de este archivo.
 // =============================================================================
 
-import { PurchaseRequest, PurchaseRequestLine, PurchaseRequestHistoryEntry, PurchaseRequestStatus } from '../types';
-import { getProformas, getProforma } from './proformaService';
-import { createPurchaseOrder } from './purchaseOrderService';
-import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch } from './espoClient';
+import { PurchaseRequest, PurchaseRequestLine, PurchaseRequestHistoryEntry, PurchaseRequestStatus } from '@/types';
+import { getProformas, getProforma } from '@/features/compras/proformas/proformaService';
+import { createPurchaseOrder } from '@/features/compras/ordenes/purchaseOrderService';
+import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, createEspoList } from '@/shared/api/espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -103,10 +103,21 @@ const LINES_SUBRESOURCE =
 const HISTORY_SUBRESOURCE =
   import.meta.env.VITE_PURCHASE_REQUEST_HISTORY_SUBRESOURCE ?? 'historial';
 
+// POST/PUT/DELETE contra el sub-recurso anidado (/ENTITY/{id}/LINES_SUBRESOURCE)
+// solo relacionan/desrelacionan ids existentes en EspoCRM — no crean ni editan
+// un registro con datos completos (confirmado contra el EspoCRM real). Para
+// crear/editar/borrar se usa la entidad hija directo, con su campo de enlace
+// al padre. El GET del sub-recurso (listar) sí funciona tal cual.
+const LINE_ENTITY = import.meta.env.VITE_PURCHASE_REQUEST_LINE_ENTITY ?? 'CSolicitudCompraDetalle';
+const LINE_PARENT_FIELD =
+  import.meta.env.VITE_PURCHASE_REQUEST_LINE_PARENT_FIELD ?? 'cSolicitudCompraId';
+const HISTORY_ENTITY =
+  import.meta.env.VITE_PURCHASE_REQUEST_HISTORY_ENTITY ?? 'CSolicitudCompraHistorial';
+const HISTORY_PARENT_FIELD =
+  import.meta.env.VITE_PURCHASE_REQUEST_HISTORY_PARENT_FIELD ?? 'cSolicitudCompraId';
 
-const LIST_PAGE_SIZE = 200;
-// Tope de páginas al recorrer el listado completo (ver getPurchaseRequests).
-const MAX_LIST_PAGES = 25; // 25 * 200 = 5000 solicitudes como máximo
+
+// La paginación de listados vive en espoClient.ts (createEspoList).
 
 export const PRIORITIES = ['BAJA', 'MEDIA', 'ALTA'] as const;
 
@@ -227,6 +238,7 @@ export function getPurchaseRequestErrorMessage(error: unknown, fallback: string)
 }
 
 const espoFetch = createEspoFetch(PURCHASE_REQUESTS_API_URL);
+const listAll = createEspoList(espoFetch);
 
 // --- UTILIDADES --------------------------------------------------------------
 
@@ -342,14 +354,17 @@ function buildLinePayload(line: {
   notes?: string;
   priority?: string;
 }): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     [LINE_FIELDS.PRODUCT]: line.product,
     [LINE_FIELDS.QUANTITY]: line.quantity,
     [LINE_FIELDS.UNIT]: line.unit,
     [LINE_FIELDS.TARGET_AREA]: line.targetArea || null,
     [LINE_FIELDS.NOTES]: line.notes || null,
-    [LINE_FIELDS.PRIORITY]: line.priority || null,
   };
+  // El enum "prioridad" en EspoCRM no acepta null/"" (solo sus 3 opciones) —
+  // omitirlo entero cuando no se eligió deja que EspoCRM aplique su default.
+  if (line.priority) payload[LINE_FIELDS.PRIORITY] = line.priority;
+  return payload;
 }
 
 function validateLines(lines: { product: string; quantity: number; unit: string }[]): void {
@@ -421,8 +436,9 @@ async function appendHistoryEntry(
     [HISTORY_FIELDS.ACTION]: action,
     [HISTORY_FIELDS.STATUS]: status,
     [HISTORY_FIELDS.DETAILS]: details || null,
+    [HISTORY_PARENT_FIELD]: requestId,
   };
-  await espoFetch(`/${ENTITY}/${requestId}/${HISTORY_SUBRESOURCE}`, {
+  await espoFetch(`/${HISTORY_ENTITY}`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -448,23 +464,7 @@ export async function getPurchaseRequestHistory(requestId: string): Promise<Purc
 /** Lista todas las solicitudes de compra (orden descendente por fecha de creación). */
 export async function getPurchaseRequests(): Promise<PurchaseRequest[]> {
   return cachedList(async () => {
-    // Recorre todas las páginas: con maxSize fijo, una sola página se
-    // quedaría corta (y en silencio) apenas hubiera más de LIST_PAGE_SIZE
-    // solicitudes registradas.
-    const all: any[] = [];
-    for (let page = 0; page < MAX_LIST_PAGES; page++) {
-      const params = new URLSearchParams({
-        maxSize: String(LIST_PAGE_SIZE),
-        offset: String(page * LIST_PAGE_SIZE),
-        orderBy: 'createdAt',
-        order: 'desc',
-      });
-      const res = await espoFetch(`/${ENTITY}?${params.toString()}`);
-      const data = await res.json();
-      const list = data.list ?? [];
-      all.push(...list);
-      if (list.length < LIST_PAGE_SIZE) break;
-    }
+    const all = await listAll(`/${ENTITY}`, { orderBy: 'createdAt', order: 'desc' });
     return all.map((raw: any) => mapRequest(raw));
   });
 }
@@ -524,9 +524,9 @@ export async function createPurchaseRequest(
   // creación en lote de líneas (contrato no confirmado).
   const savedLines: PurchaseRequestLine[] = [];
   for (const line of input.lines) {
-    const lineRes = await espoFetch(`/${ENTITY}/${requestId}/${LINES_SUBRESOURCE}`, {
+    const lineRes = await espoFetch(`/${LINE_ENTITY}`, {
       method: 'POST',
-      body: JSON.stringify(buildLinePayload(line)),
+      body: JSON.stringify({ ...buildLinePayload(line), [LINE_PARENT_FIELD]: requestId }),
     });
     savedLines.push(mapLine(await lineRes.json()));
   }
@@ -551,18 +551,18 @@ async function syncPurchaseRequestLines(requestId: string, newLines: PurchaseReq
   const toCreate = newLines.filter((l) => !l.id);
 
   for (const line of toDelete) {
-    await espoFetch(`/${ENTITY}/${requestId}/${LINES_SUBRESOURCE}/${line.id}`, { method: 'DELETE' });
+    await espoFetch(`/${LINE_ENTITY}/${line.id}`, { method: 'DELETE' });
   }
   for (const line of toUpdate) {
-    await espoFetch(`/${ENTITY}/${requestId}/${LINES_SUBRESOURCE}/${line.id}`, {
+    await espoFetch(`/${LINE_ENTITY}/${line.id}`, {
       method: 'PUT',
       body: JSON.stringify(buildLinePayload(line)),
     });
   }
   for (const line of toCreate) {
-    await espoFetch(`/${ENTITY}/${requestId}/${LINES_SUBRESOURCE}`, {
+    await espoFetch(`/${LINE_ENTITY}`, {
       method: 'POST',
-      body: JSON.stringify(buildLinePayload(line)),
+      body: JSON.stringify({ ...buildLinePayload(line), [LINE_PARENT_FIELD]: requestId }),
     });
   }
 }

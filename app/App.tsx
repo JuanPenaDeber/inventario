@@ -1,22 +1,29 @@
 
 import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { LayoutGrid, Settings, ChevronDown, ClipboardList, UserCheck, Menu, X, Wrench, ShoppingCart, FileText, LayoutDashboard, Lightbulb } from 'lucide-react';
-import { InventoryItem, ViewState } from './types';
-import { getInventory, addInventoryItem, deleteInventoryItem, updateInventoryItem } from './services/inventoryService';
+import { InventoryItem, InventoryItemInput, ViewState } from '@/types';
+import {
+  getInventory,
+  addInventoryItem,
+  deleteInventoryItem,
+  updateInventoryItem,
+  getInventoryErrorMessage,
+} from '@/shared/api/inventoryService';
+import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 
 // Cada módulo carga su propio JS solo cuando se visita, en vez de que todos
 // (Compras incluido, que es el más pesado) vayan en el bundle inicial de
 // cualquiera que solo quiera ver el Dashboard de inventario.
-const Dashboard = lazy(() => import('./components/Dashboard'));
-const InventoryForm = lazy(() => import('./components/InventoryForm'));
-const ProviderManager = lazy(() => import('./components/ProviderManager'));
-const LoanManager = lazy(() => import('./components/LoanManager'));
-const AssignmentManager = lazy(() => import('./components/AssignmentManager'));
-const IncidentsModule = lazy(() => import('./components/incidents/IncidentsModule'));
-const PurchaseOrderManager = lazy(() => import('./components/PurchaseOrderManager'));
-const PurchaseRequestManager = lazy(() => import('./components/PurchaseRequestManager'));
-const PurchaseDashboard = lazy(() => import('./components/PurchaseDashboard'));
-const SuggestionManager = lazy(() => import('./components/SuggestionManager'));
+const Dashboard = lazy(() => import('@/features/inventario/Dashboard'));
+const InventoryForm = lazy(() => import('@/features/inventario/InventoryForm'));
+const ProviderManager = lazy(() => import('@/features/inventario/ProviderManager'));
+const LoanManager = lazy(() => import('@/features/prestamos/LoanManager'));
+const AssignmentManager = lazy(() => import('@/features/asignaciones/AssignmentManager'));
+const IncidentsModule = lazy(() => import('@/features/incidencias/IncidentsModule'));
+const PurchaseOrderManager = lazy(() => import('@/features/compras/ordenes/PurchaseOrderManager'));
+const PurchaseRequestManager = lazy(() => import('@/features/compras/solicitudes/PurchaseRequestManager'));
+const PurchaseDashboard = lazy(() => import('@/features/compras/PurchaseDashboard'));
+const SuggestionManager = lazy(() => import('@/features/compras/sugerencias/SuggestionManager'));
 
 // Clases completas por color (no construidas con template literals): el CDN
 // de Tailwind que usa este proyecto escanea el DOM ya renderizado, así que
@@ -70,6 +77,8 @@ const App: React.FC = () => {
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
   const firstLoad = useRef(true);
 
   // Navegación cruzada entre módulos de compras (Solicitudes <-> Órdenes,
@@ -124,28 +133,46 @@ const App: React.FC = () => {
     loadItems();
   }, [view]);
 
-  const handleSaveItem = async (itemData: any) => {
+  const handleSaveItem = async (itemData: InventoryItemInput) => {
     setLoading(true);
-    if (itemData.id) {
-        // Update existing
+    setError(null);
+    try {
+      if (itemData.id) {
         const updated = await updateInventoryItem(itemData.id, itemData);
-        if (updated) {
-            setItems(prev => prev.map(i => i.id === itemData.id ? updated : i));
-        }
-    } else {
-        // Add new
+        setItems((prev) => prev.map((i) => (i.id === itemData.id ? updated : i)));
+      } else {
         const newItem = await addInventoryItem(itemData);
-        setItems(prev => [newItem, ...prev]);
+        setItems((prev) => [newItem, ...prev]);
+      }
+      setView(ViewState.DASHBOARD);
+      setEditingItem(undefined);
+    } catch (err) {
+      // Sin este catch, un fallo al guardar dejaba `loading` en true para
+      // siempre (spinner colgado) y el usuario no veía por qué.
+      setError(getInventoryErrorMessage(err, 'No se pudo guardar el equipo.'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-    setView(ViewState.DASHBOARD);
-    setEditingItem(undefined);
   };
 
-  const handleDeleteItem = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this item?')) {
+  const handleDeleteItem = (id: string) => {
+    const item = items.find((i) => i.id === id);
+    setConfirmState({
+      message: `¿Eliminar "${item?.name ?? 'este equipo'}"? Esta acción no se puede deshacer.`,
+      tone: 'danger',
+      confirmLabel: 'Eliminar',
+      onConfirm: () => doDeleteItem(id),
+    });
+  };
+
+  const doDeleteItem = async (id: string) => {
+    setConfirmState(null);
+    setError(null);
+    try {
       await deleteInventoryItem(id);
-      setItems(prev => prev.filter(i => i.id !== id));
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    } catch (err) {
+      setError(getInventoryErrorMessage(err, 'No se pudo eliminar el equipo.'));
     }
   };
 
@@ -298,6 +325,14 @@ const App: React.FC = () => {
             depende de `items`) — cada otro módulo maneja su propia carga
             internamente, igual que ya hacían Préstamos/Asignaciones/etc. */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:max-w-none">
+          {error && (
+            <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 print:hidden">
+              <span>{error}</span>
+              <button onClick={() => setError(null)} aria-label="Cerrar aviso" className="shrink-0">
+                <X size={16} />
+              </button>
+            </div>
+          )}
           <Suspense fallback={<PageSpinner />}>
             {view === ViewState.DASHBOARD && (
                 loading ? (
@@ -360,6 +395,8 @@ const App: React.FC = () => {
             )}
           </Suspense>
         </main>
+
+        <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} />
     </div>
   );
 };

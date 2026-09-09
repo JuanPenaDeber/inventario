@@ -11,8 +11,8 @@
 //   - producto (string)
 // =============================================================================
 
-import { ProductSuggestion } from '../types';
-import { getEspoErrorMessage, createEspoFetch } from './espoClient';
+import { ProductSuggestion } from '@/types';
+import { getEspoErrorMessage, createEspoFetch, createEspoList } from '@/shared/api/espoClient';
 
 export const SUGGESTIONS_API_URL =
   import.meta.env.VITE_SUGGESTIONS_API_URL ?? 'http://local.grupoeldeber.com/api/v1';
@@ -34,6 +34,7 @@ export function getSuggestionErrorMessage(error: unknown, fallback: string): str
 }
 
 const espoFetch = createEspoFetch(SUGGESTIONS_API_URL);
+const listAll = createEspoList(espoFetch);
 
 function mapSuggestion(raw: any): ProductSuggestion {
   return {
@@ -77,24 +78,10 @@ async function cachedList(fetcher: () => Promise<ProductSuggestion[]>): Promise<
   return inflight;
 }
 
-const LIST_PAGE_SIZE = 200;
-const MAX_LIST_PAGES = 25; // 25 * 200 = 5000 sugerencias como máximo
-
 export async function getProductSuggestions(): Promise<ProductSuggestion[]> {
   return cachedList(async () => {
-    const all: any[] = [];
-    for (let page = 0; page < MAX_LIST_PAGES; page++) {
-      const params = new URLSearchParams({
-        maxSize: String(LIST_PAGE_SIZE),
-        offset: String(page * LIST_PAGE_SIZE),
-      });
-      const res = await espoFetch(`/${ENTITY}?${params.toString()}`);
-      const data = await res.json();
-      const list = data.list ?? [];
-      all.push(...list);
-      if (list.length < LIST_PAGE_SIZE) break;
-    }
-    return all.map(mapSuggestion);
+    const list = await listAll(`/${ENTITY}`);
+    return list.map(mapSuggestion);
   });
 }
 

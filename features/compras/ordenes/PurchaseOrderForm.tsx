@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Save } from 'lucide-react';
-import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus, Provider } from '../types';
-import { getProviders } from '../services/inventoryService';
+import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus, Provider } from '@/types';
+import { getProviders } from '@/shared/api/inventoryService';
 import {
   calculateLineSubtotal,
   calculateOrderTotals,
@@ -9,7 +9,7 @@ import {
   CURRENCIES,
   INITIAL_STATUSES,
   getSelectableStatuses,
-} from '../services/purchaseOrderService';
+} from '@/features/compras/ordenes/purchaseOrderService';
 
 // Forma unificada que recibe el padre (PurchaseOrderManager) para decidir si
 // crea o actualiza. `id` presente => update; ausente => create.

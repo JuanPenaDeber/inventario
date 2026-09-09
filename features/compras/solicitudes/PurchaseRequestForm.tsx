@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Save, Send, Lightbulb } from 'lucide-react';
-import { PurchaseRequest, PurchaseRequestLine, Employee, ProductSuggestion } from '../types';
-import { getEmployees } from '../services/inventoryService';
-import { PRIORITIES } from '../services/purchaseRequestService';
-import { getProductSuggestions, matchSuggestions } from '../services/suggestionService';
+import { PurchaseRequest, PurchaseRequestLine, Employee, ProductSuggestion } from '@/types';
+import { getEmployees } from '@/shared/api/inventoryService';
+import { PRIORITIES } from '@/features/compras/solicitudes/purchaseRequestService';
+import { getProductSuggestions, matchSuggestions } from '@/features/compras/sugerencias/suggestionService';
 
 // Forma unificada que recibe el padre (PurchaseRequestManager) para decidir
 // si crea o actualiza. `id` presente => update; ausente => create.

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCw,
   Download,
@@ -20,13 +20,11 @@ import {
   updateIncident,
   downloadExcelReport,
   getErrorMessage,
-  formatDateTime,
-  today,
-  daysAgo,
-  isWithinRange,
   type Estado,
   type Incident,
-} from '../../services/incidentsService';
+} from '@/features/incidencias/incidentsService';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import { today, daysAgo, isWithinDateRange, formatDateTime } from '@/shared/utils/reportUtils';
 
 interface DashboardFilters {
   startDate: string;
@@ -51,36 +49,28 @@ const inputBase =
 
 /** Panel administrativo de incidencias: filtros, tabla, edición y exportación. */
 export default function IncidentsAdmin() {
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const {
+    data: incidents,
+    setData: setIncidents,
+    loading,
+    error,
+    setError,
+    refresh: load,
+  } = useAsyncData<Incident[]>(getIncidents, [], {
+    errorMessage: 'No se pudieron cargar las incidencias.',
+    getErrorMessage,
+  });
+
   const [filters, setFilters] = useState<DashboardFilters>(defaultFilters);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [editing, setEditing] = useState<Incident | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getIncidents();
-      setIncidents(data);
-    } catch (err) {
-      setError(getErrorMessage(err, 'No se pudieron cargar las incidencias.'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   // Filtrado en el cliente: fecha (createdAt) + usuario/área/artículo/estado.
   const filtered = useMemo(() => {
     const usuario = filters.usuario.trim().toLowerCase();
     return incidents.filter((inc) => {
-      if (!isWithinRange(inc.createdAt, filters.startDate, filters.endDate))
+      if (!isWithinDateRange(inc.createdAt, filters.startDate, filters.endDate))
         return false;
       if (usuario && !inc.usuario.toLowerCase().includes(usuario)) return false;
       if (filters.area && inc.area !== filters.area) return false;

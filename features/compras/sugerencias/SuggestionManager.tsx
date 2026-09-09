@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Lightbulb, Trash2, Plus } from 'lucide-react';
-import { ProductSuggestion } from '../types';
+import { ProductSuggestion } from '@/types';
 import {
   getProductSuggestions,
   createProductSuggestion,
   deleteProductSuggestion,
   getSuggestionErrorMessage,
-} from '../services/suggestionService';
+} from '@/features/compras/sugerencias/suggestionService';
+import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
 
 /**
  * Configuración de sugerencias de productos por área y cargo (Fase 4,
@@ -15,30 +17,22 @@ import {
  * puede entrar aquí (ver README.md).
  */
 const SuggestionManager: React.FC = () => {
-  const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const {
+    data: suggestions,
+    setData: setSuggestions,
+    loading,
+    error,
+    setError,
+  } = useAsyncData<ProductSuggestion[]>(getProductSuggestions, [], {
+    errorMessage: 'No se pudieron cargar las sugerencias.',
+    getErrorMessage: getSuggestionErrorMessage,
+  });
 
+  const [saving, setSaving] = useState(false);
   const [area, setArea] = useState('');
   const [position, setPosition] = useState('');
   const [product, setProduct] = useState('');
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setSuggestions(await getProductSuggestions());
-    } catch (err) {
-      setError(getSuggestionErrorMessage(err, 'No se pudieron cargar las sugerencias.'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,8 +50,17 @@ const SuggestionManager: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('¿Eliminar esta sugerencia?')) return;
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      message: '¿Eliminar esta sugerencia?',
+      tone: 'danger',
+      confirmLabel: 'Eliminar',
+      onConfirm: () => doDelete(id),
+    });
+  };
+
+  const doDelete = async (id: string) => {
+    setConfirmState(null);
     try {
       await deleteProductSuggestion(id);
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
@@ -143,6 +146,8 @@ const SuggestionManager: React.FC = () => {
           )}
         </div>
       </div>
+
+      <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} />
     </div>
   );
 };

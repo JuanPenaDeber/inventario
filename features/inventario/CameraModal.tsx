@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { X, SwitchCamera } from 'lucide-react';
-import { CameraDevice } from '../types';
+import { CameraDevice } from '@/types';
 
 interface CameraModalProps {
   isOpen: boolean;

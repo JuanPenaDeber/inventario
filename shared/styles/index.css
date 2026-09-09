@@ -1,0 +1,9 @@
+/* Entrada de estilos del proyecto.
+ *
+ * Reemplaza al CDN de Tailwind (<script src="cdn.tailwindcss.com">) que estaba
+ * en index.html: aquel descargaba Tailwind entero en cada carga y generaba las
+ * clases mirando el DOM ya renderizado. Ahora Vite compila solo las clases que
+ * el código realmente usa (ver `content` en tailwind.config.js). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

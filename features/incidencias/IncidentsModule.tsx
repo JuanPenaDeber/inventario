@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { UserRound, ShieldCheck, Lock, LogOut } from 'lucide-react';
-import { ADMIN_PASSWORD } from '../../services/incidentsService';
-import IncidentPortal from './IncidentPortal';
-import IncidentsAdmin from './IncidentsAdmin';
+import { ADMIN_PASSWORD } from '@/features/incidencias/incidentsService';
+import IncidentPortal from '@/features/incidencias/IncidentPortal';
+import IncidentsAdmin from '@/features/incidencias/IncidentsAdmin';
 
 const AUTH_STORAGE_KEY = 'incidencias.admin.auth';
 
@@ -32,7 +32,9 @@ export default function IncidentsModule() {
   );
 
   const login = (password: string): boolean => {
-    const ok = password === ADMIN_PASSWORD;
+    // Sin VITE_ADMIN_PASSWORD configurada no se acepta ningún intento
+    // (fail closed), en vez de caer a una contraseña fija en el código.
+    const ok = !!ADMIN_PASSWORD && password === ADMIN_PASSWORD;
     if (ok) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, 'true');
       setAuthed(true);

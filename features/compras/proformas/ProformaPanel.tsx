@@ -11,8 +11,8 @@ import {
   AlertTriangle,
   Ban,
 } from 'lucide-react';
-import { Provider, PurchaseRequest, PurchaseFlowRole, Proforma, ProformaLine } from '../types';
-import { getProviders } from '../services/inventoryService';
+import { Provider, PurchaseRequest, PurchaseFlowRole, Proforma, ProformaLine } from '@/types';
+import { getProviders } from '@/shared/api/inventoryService';
 import {
   getProformas,
   createProforma,
@@ -23,8 +23,8 @@ import {
   getProformaValidity,
   getProformaErrorMessage,
   DEFAULT_PROFORMA_TAX_RATE_PERCENT,
-} from '../services/proformaService';
-import { CURRENCIES } from '../services/purchaseOrderService';
+} from '@/features/compras/proformas/proformaService';
+import { CURRENCIES } from '@/features/compras/ordenes/purchaseOrderService';
 import {
   logPurchaseRequestEvent,
   startQuotation,
@@ -33,8 +33,8 @@ import {
   generatePurchaseOrder,
   finalizeRequest,
   getPurchaseRequestErrorMessage,
-} from '../services/purchaseRequestService';
-import { formatDate } from '../services/reportUtils';
+} from '@/features/compras/solicitudes/purchaseRequestService';
+import { formatDate } from '@/shared/utils/reportUtils';
 
 const VALIDITY_CHIP: Record<string, string> = {
   VIGENTE: 'text-emerald-600 border-emerald-300 bg-emerald-50',

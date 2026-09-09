@@ -7,7 +7,7 @@ import {
   createIncident,
   getErrorMessage,
   type CreateIncidentPayload,
-} from '../../services/incidentsService';
+} from '@/features/incidencias/incidentsService';
 
 const EMPTY: CreateIncidentPayload = {
   usuario: '',

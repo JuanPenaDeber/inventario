@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Camera, Building2, UserCheck, Upload, Image as ImageIcon, AlertTriangle, FileText, Check } from 'lucide-react';
-import { InventoryItem, Provider, Employee } from '../types';
-import { getProviders, getEmployees, createAssignment, createAssignmentEquipo } from '../services/inventoryService';
-import { getPhotoUrl } from '../services/photoServer';
-import CameraModal from './CameraModal';
+import { InventoryItem, Provider, Employee } from '@/types';
+import { getProviders, getEmployees, createAssignment, createAssignmentEquipo } from '@/shared/api/inventoryService';
+import { getPhotoUrl } from '@/shared/api/photoServer';
+import CameraModal from '@/features/inventario/CameraModal';
 
 interface InventoryFormProps {
   initialData?: InventoryItem;

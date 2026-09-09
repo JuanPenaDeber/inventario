@@ -107,6 +107,45 @@ export function createEspoFetch(baseUrl: string) {
   };
 }
 
+// --- LISTADOS PAGINADOS -----------------------------------------------------
+// EspoCRM devuelve como máximo 200 registros por petición y pedirle más
+// responde vacío, así que toda lista necesita recorrer páginas. Antes cada
+// servicio escribía su propio bucle (tres copias idénticas) y el inventario
+// directamente no paginaba: mostraba 200 de 429 equipos sin avisar.
+
+/** Máximo que acepta EspoCRM por petición. */
+export const ESPO_PAGE_SIZE = 200;
+/** Tope de seguridad: 50 * 200 = 10.000 registros. Garantiza que el bucle termine. */
+const MAX_PAGES = 50;
+
+/**
+ * Crea la función `listAll` de un servicio a partir de su `espoFetch`.
+ * Recorre todas las páginas y devuelve los registros crudos concatenados.
+ * Propaga los errores igual que espoFetch (contrato "siempre lanza").
+ */
+export function createEspoList(espoFetch: ReturnType<typeof createEspoFetch>) {
+  return async function listAll(
+    path: string,
+    params: Record<string, string> = {},
+  ): Promise<any[]> {
+    const all: any[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const query = new URLSearchParams({
+        ...params,
+        maxSize: String(ESPO_PAGE_SIZE),
+        offset: String(page * ESPO_PAGE_SIZE),
+      });
+      const res = await espoFetch(`${path}?${query.toString()}`);
+      const data = await res.json();
+      const list: any[] = Array.isArray(data) ? data : (data.list ?? []);
+      all.push(...list);
+      if (list.length < ESPO_PAGE_SIZE) break;
+      if (typeof data.total === 'number' && all.length >= data.total) break;
+    }
+    return all;
+  };
+}
+
 /** Redondeo a 2 decimales, usado en todos los cálculos de subtotal/impuesto/total. */
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;

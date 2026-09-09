@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Plus, Search, Package, DollarSign, AlertCircle, Filter, ArrowUpDown, UserCheck, CheckCircle } from 'lucide-react';
-import { InventoryItem } from '../types';
-import { getPhotoUrl } from '../services/photoServer';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Plus, Search, Package, DollarSign, AlertCircle, Filter, ArrowUpDown, UserCheck, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { InventoryItem } from '@/types';
+import { getPhotoUrl } from '@/shared/api/photoServer';
 
 interface DashboardProps {
   items: InventoryItem[];
@@ -13,7 +13,12 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onDeleteItem }) => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
-  const [sortBy, setSortBy] = useState<'name' | 'date' | 'precio'>('date');
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'precio' | 'category'>('date');
+  // Paginación de la tabla: con 429 equipos se dibujaban las 429 filas de una
+  // vez (~8.000 nodos de DOM) y el costo crecía con el inventario. Mismo
+  // enfoque que ya usa el panel de Incidencias.
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const filteredItems = useMemo(() => {
     const result = items.filter(item => {
@@ -30,6 +35,9 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
     // Sorting
     result.sort((a, b) => {
       if (sortBy === 'name') return a.name.localeCompare(b.name);
+      // Faltaba esta rama: la opción "Categoría (A-Z)" existía en el
+      // desplegable pero caía en silencio al orden por fecha.
+      if (sortBy === 'category') return a.category.localeCompare(b.category);
       if (sortBy === 'precio') return (b.precio || 0) - (a.precio || 0);
       // Date desc
       return new Date(b.fechaCompra).getTime() - new Date(a.fechaCompra).getTime();
@@ -37,6 +45,19 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
 
     return result;
   }, [items, search, filterStatus, sortBy]);
+
+  // Al cambiar filtros, volver a la primera página (si no, se puede quedar
+  // mostrando una página que ya no existe).
+  useEffect(() => {
+    setPage(0);
+  }, [search, filterStatus, sortBy, rowsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / rowsPerPage));
+  const currentPage = Math.min(page, totalPages - 1);
+  const visibleItems = useMemo(
+    () => filteredItems.slice(currentPage * rowsPerPage, currentPage * rowsPerPage + rowsPerPage),
+    [filteredItems, currentPage, rowsPerPage],
+  );
 
   const stats = useMemo(() => {
     return {
@@ -132,7 +153,7 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
             <ArrowUpDown size={16} className="text-slate-400" />
             <select 
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
               className="bg-transparent outline-none text-sm text-slate-700 cursor-pointer"
             >
               <option value="date">Nuevos primero</option>
@@ -189,7 +210,7 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
                   </td>
                 </tr>
               ) : (
-                filteredItems.map(item => (
+                visibleItems.map(item => (
                   <tr 
                     key={item.id} 
                     className="hover:bg-slate-50 transition-colors cursor-pointer"
@@ -246,6 +267,46 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
             </tbody>
           </table>
         </div>
+
+        {filteredItems.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
+            <div className="flex items-center gap-2">
+              <label htmlFor="rows-per-page">Filas por página</label>
+              <select
+                id="rows-per-page"
+                value={rowsPerPage}
+                onChange={(e) => setRowsPerPage(Number(e.target.value))}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1"
+              >
+                {[25, 50, 100].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="tabular-nums">
+                {currentPage * rowsPerPage + 1}–{Math.min((currentPage + 1) * rowsPerPage, filteredItems.length)} de {filteredItems.length}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={currentPage === 0}
+                aria-label="Página anterior"
+                className="rounded-lg border border-slate-300 p-1.5 disabled:opacity-40 hover:bg-slate-50"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={currentPage >= totalPages - 1}
+                aria-label="Página siguiente"
+                className="rounded-lg border border-slate-300 p-1.5 disabled:opacity-40 hover:bg-slate-50"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ import {
   X,
   RefreshCw,
 } from 'lucide-react';
-import { PurchaseOrder, PurchaseOrderStatus, PURCHASE_ORDER_STATUSES } from '../types';
+import { PurchaseOrder, PurchaseOrderStatus, PURCHASE_ORDER_STATUSES } from '@/types';
 import {
   getPurchaseOrders,
   getPurchaseOrder,
@@ -22,11 +22,13 @@ import {
   cancelPurchaseOrder,
   receivePurchaseOrder,
   getPurchaseOrderErrorMessage,
-} from '../services/purchaseOrderService';
-import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '../services/reportUtils';
-import { getLogoUrl } from '../services/photoServer';
-import DateRangeBar from './DateRangeBar';
-import PurchaseOrderForm, { PurchaseOrderFormValues } from './PurchaseOrderForm';
+} from '@/features/compras/ordenes/purchaseOrderService';
+import { isWithinDateRange, downloadXlsx, formatDate, rangeSuffix } from '@/shared/utils/reportUtils';
+import { getLogoUrl } from '@/shared/api/photoServer';
+import DateRangeBar from '@/shared/components/DateRangeBar';
+import PurchaseOrderForm, { PurchaseOrderFormValues } from '@/features/compras/ordenes/PurchaseOrderForm';
+import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
 
 const STATUS_CHIP: Record<PurchaseOrderStatus, string> = {
   BORRADOR: 'text-slate-600 border-slate-300 bg-slate-50',
@@ -47,9 +49,17 @@ interface PurchaseOrderManagerProps {
 
 const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSearch, onConsumeInitialSearch }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const {
+    data: orders,
+    loading,
+    error,
+    setError,
+    refresh,
+  } = useAsyncData<PurchaseOrder[]>(getPurchaseOrders, [], {
+    errorMessage: 'No se pudieron cargar las órdenes de compra.',
+    getErrorMessage: getPurchaseOrderErrorMessage,
+  });
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
@@ -57,6 +67,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
 
   const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
 
   const [search, setSearch] = useState(initialSearch || '');
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -65,23 +76,6 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
 
   const [receivedQuantities, setReceivedQuantities] = useState<Record<string, number>>({});
   const [receiving, setReceiving] = useState(false);
-
-  const refresh = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getPurchaseOrders();
-      setOrders(data);
-    } catch (err) {
-      setError(getPurchaseOrderErrorMessage(err, 'No se pudieron cargar las órdenes de compra.'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   // Consume la búsqueda inicial (llegada por navegación cruzada) una sola vez.
   useEffect(() => {
@@ -112,7 +106,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
       }
     };
     loadDetail();
-  }, [selectedOrderId]);
+  }, [selectedOrderId, setError]);
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -220,8 +214,17 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
     }
   };
 
-  const handleCancelOrder = async (order: PurchaseOrder) => {
-    if (!window.confirm(`¿Cancelar la orden ${order.reference}? Esta acción no se puede deshacer.`)) return;
+  const handleCancelOrder = (order: PurchaseOrder) => {
+    setConfirmState({
+      message: `¿Cancelar la orden ${order.reference}? Esta acción no se puede deshacer.`,
+      tone: 'danger',
+      confirmLabel: 'Cancelar orden',
+      onConfirm: () => doCancelOrder(order),
+    });
+  };
+
+  const doCancelOrder = async (order: PurchaseOrder) => {
+    setConfirmState(null);
     setError(null);
     try {
       await cancelPurchaseOrder(order.id);
@@ -266,7 +269,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const header = [
       'Referencia', 'Proveedor', 'Fecha solicitud', 'Fecha esperada',
       'Solicitante', 'Moneda', 'Estado', 'Subtotal', 'Impuesto', 'Total',
@@ -283,7 +286,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
       o.taxAmount,
       o.total,
     ]);
-    downloadXlsx(
+    await downloadXlsx(
       `ordenes_compra_${rangeSuffix(startDate, endDate)}.xlsx`,
       'OrdenesCompra',
       [header, ...rows],
@@ -315,7 +318,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col">
+    <div className="min-h-[calc(100vh-8rem)] flex flex-col">
 
       {/* --- VISTA DE IMPRESIÓN --- */}
       {selectedOrder && (
@@ -498,10 +501,10 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
       </div>
 
       {/* --- MASTER DETAIL --- */}
-      <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200 no-print">
+      <div className="flex-1 flex flex-col md:flex-row gap-6 bg-white rounded-xl shadow-sm border border-slate-200 no-print">
 
         {/* Lista (izquierda) */}
-        <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col overflow-y-auto custom-scrollbar">
+        <div className="w-full md:w-1/3 border-r border-slate-200 flex flex-col md:max-h-[calc(100vh-8rem)] md:overflow-y-auto custom-scrollbar">
           {loading ? (
             <div className="p-8 text-center text-slate-400">Cargando órdenes...</div>
           ) : filteredOrders.length === 0 ? (
@@ -531,7 +534,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
         </div>
 
         {/* Detalle (derecha) */}
-        <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30 overflow-y-auto">
+        <div className="w-full md:w-2/3 flex flex-col bg-slate-50/30">
           {selectedOrder ? (
             <>
               <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start gap-4">
@@ -560,7 +563,7 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 p-6">
                 {selectedOrder.notes && (
                   <div className="mb-6 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm text-yellow-800">
                     <span className="font-bold">Observaciones:</span> {selectedOrder.notes}
@@ -663,13 +666,15 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ initialSear
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+            <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center text-slate-400">
               <ShoppingCart size={48} className="opacity-20 mb-4" />
               <p>Selecciona una orden para ver el detalle</p>
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} />
     </div>
   );
 };

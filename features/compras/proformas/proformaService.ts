@@ -58,8 +58,8 @@
 // sin adjunto (no bloquea el registro — ver createProforma).
 // =============================================================================
 
-import { Proforma, ProformaLine, ProformaValidity } from '../types';
-import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, round2 } from './espoClient';
+import { Proforma, ProformaLine, ProformaValidity } from '@/types';
+import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, round2 } from '@/shared/api/espoClient';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -71,6 +71,19 @@ const REQUEST_ENTITY = import.meta.env.VITE_PURCHASE_REQUEST_ENTITY ?? 'CSolicit
 const PROFORMA_ENTITY = import.meta.env.VITE_PROFORMA_ENTITY ?? 'CProforma';
 const PROFORMAS_SUBRESOURCE = import.meta.env.VITE_PROFORMAS_SUBRESOURCE ?? 'proformas';
 const PROFORMA_LINES_SUBRESOURCE = import.meta.env.VITE_PROFORMA_LINES_SUBRESOURCE ?? 'lineas';
+
+// POST contra el sub-recurso anidado (/ENTITY/{id}/SUBRESOURCE) solo relaciona
+// ids existentes en EspoCRM — no crea un registro con datos completos
+// (confirmado contra el EspoCRM real). Para crear se usa la entidad hija
+// directo, con su campo de enlace al padre. El GET del sub-recurso (listar)
+// sí funciona tal cual.
+const PROFORMA_PARENT_FIELD =
+  import.meta.env.VITE_PROFORMA_PARENT_FIELD ?? 'cSolicitudCompraId';
+const PROFORMA_LINE_ENTITY = import.meta.env.VITE_PROFORMA_LINE_ENTITY ?? 'CProformaDetalle';
+// "cProforma1" (no "cProforma") porque EspoCRM le agregó el sufijo al chocar
+// con otro nombre de enlace al crear la relación — ver Plano de Compras.
+const PROFORMA_LINE_PARENT_FIELD =
+  import.meta.env.VITE_PROFORMA_LINE_PARENT_FIELD ?? 'cProforma1Id';
 
 export const DEFAULT_PROFORMA_TAX_RATE_PERCENT = Number(
   import.meta.env.VITE_PROFORMA_TAX_RATE ?? 13,
@@ -430,18 +443,18 @@ export async function createProforma(
     attachmentName: uploaded?.name,
   });
 
-  const res = await espoFetch(`/${REQUEST_ENTITY}/${requestId}/${PROFORMAS_SUBRESOURCE}`, {
+  const res = await espoFetch(`/${PROFORMA_ENTITY}`, {
     method: 'POST',
-    body: JSON.stringify(headerPayload),
+    body: JSON.stringify({ ...headerPayload, [PROFORMA_PARENT_FIELD]: requestId }),
   });
   const savedHeader = await res.json();
   const proformaId = savedHeader.id;
 
   const savedLines: ProformaLine[] = [];
   for (const line of lines) {
-    const lineRes = await espoFetch(`/${PROFORMA_ENTITY}/${proformaId}/${PROFORMA_LINES_SUBRESOURCE}`, {
+    const lineRes = await espoFetch(`/${PROFORMA_LINE_ENTITY}`, {
       method: 'POST',
-      body: JSON.stringify(buildLinePayload(line)),
+      body: JSON.stringify({ ...buildLinePayload(line), [PROFORMA_LINE_PARENT_FIELD]: proformaId }),
     });
     savedLines.push(mapLine(await lineRes.json()));
   }

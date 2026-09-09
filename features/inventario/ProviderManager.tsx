@@ -1,12 +1,20 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Trash2, Plus, Building2, Mail, Phone, User } from 'lucide-react';
-import { Provider } from '../types';
-import { getProviders, addProvider, deleteProvider } from '../services/inventoryService';
+import { Provider } from '@/types';
+import { getProviders, addProvider, deleteProvider, getInventoryErrorMessage } from '@/shared/api/inventoryService';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
+import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 
 const ProviderManager: React.FC = () => {
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { data: providers, setData: setProviders, loading, error, setError } = useAsyncData<Provider[]>(
+    getProviders,
+    [],
+    { errorMessage: 'No se pudieron cargar los proveedores.' },
+  );
+
+  const [saving, setSaving] = useState(false);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
   const [newProvider, setNewProvider] = useState({
     name: '',
     contactPerson: '',
@@ -14,33 +22,43 @@ const ProviderManager: React.FC = () => {
     phone: ''
   });
 
-  useEffect(() => {
-    const load = async () => {
-        setLoading(true);
-        const data = await getProviders();
-        setProviders(data);
-        setLoading(false);
-    };
-    load();
-  }, []);
-
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProvider.name) return;
-    
-    setLoading(true);
-    const added = await addProvider(newProvider);
-    setProviders(prev => [...prev, added]);
-    setNewProvider({ name: '', contactPerson: '', email: '', phone: '' });
-    setLoading(false);
+
+    setSaving(true);
+    setError(null);
+    try {
+      const added = await addProvider(newProvider);
+      setProviders(prev => [...prev, added]);
+      setNewProvider({ name: '', contactPerson: '', email: '', phone: '' });
+    } catch (err) {
+      setError(getInventoryErrorMessage(err, 'No se pudo guardar el proveedor.'));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('¿Eliminar proveedor?')) {
-        setLoading(true);
-        await deleteProvider(id);
-        setProviders(prev => prev.filter(p => p.id !== id));
-        setLoading(false);
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      message: '¿Eliminar proveedor?',
+      tone: 'danger',
+      confirmLabel: 'Eliminar',
+      onConfirm: () => doDelete(id),
+    });
+  };
+
+  const doDelete = async (id: string) => {
+    setConfirmState(null);
+    setSaving(true);
+    setError(null);
+    try {
+      await deleteProvider(id);
+      setProviders(prev => prev.filter(p => p.id !== id));
+    } catch (err) {
+      setError(getInventoryErrorMessage(err, 'No se pudo eliminar el proveedor.'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -55,6 +73,13 @@ const ProviderManager: React.FC = () => {
             <p className="text-slate-500">Administrar empresas y proveedores de equipos.</p>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} aria-label="Cerrar aviso" className="shrink-0 font-medium">×</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Add Form */}
@@ -99,8 +124,8 @@ const ProviderManager: React.FC = () => {
                             className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
                         />
                     </div>
-                    <button disabled={loading} className="w-full bg-purple-600 disabled:bg-purple-300 text-white py-2 rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 font-medium">
-                        <Plus size={18} /> {loading ? 'Creando...' : 'Guardar Proveedor'}
+                    <button disabled={saving} className="w-full bg-purple-600 disabled:bg-purple-300 text-white py-2 rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 font-medium">
+                        <Plus size={18} /> {saving ? 'Creando...' : 'Guardar Proveedor'}
                     </button>
                 </form>
             </div>
@@ -148,6 +173,8 @@ const ProviderManager: React.FC = () => {
             )}
         </div>
       </div>
+
+      <ConfirmDialog state={confirmState} onCancel={() => setConfirmState(null)} busy={saving} />
     </div>
   );
 };

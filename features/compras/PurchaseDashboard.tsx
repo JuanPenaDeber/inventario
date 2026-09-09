@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import {
   LayoutDashboard,
   Clock,
@@ -13,10 +13,11 @@ import {
   RefreshCw,
   WifiOff,
 } from 'lucide-react';
-import { PurchaseRequest, PurchaseRequestStatus, Proforma } from '../types';
-import { getPurchaseRequests, getPurchaseRequestErrorMessage } from '../services/purchaseRequestService';
-import { getProformas, getProformaValidity } from '../services/proformaService';
-import { formatDate } from '../services/reportUtils';
+import { PurchaseRequest, PurchaseRequestStatus, Proforma } from '@/types';
+import { getPurchaseRequests, getPurchaseRequestErrorMessage } from '@/features/compras/solicitudes/purchaseRequestService';
+import { getProformas, getProformaValidity } from '@/features/compras/proformas/proformaService';
+import { formatDate } from '@/shared/utils/reportUtils';
+import { useAsyncData } from '@/shared/hooks/useAsyncData';
 
 const CARD_COLOR: Record<string, string> = {
   amber: 'bg-amber-100 text-amber-600',
@@ -35,6 +36,11 @@ interface ExpiringItem {
   validity: 'PROXIMA_A_VENCER' | 'VENCIDA';
 }
 
+interface DashboardData {
+  requests: PurchaseRequest[];
+  expiringItems: ExpiringItem[];
+}
+
 interface PurchaseDashboardProps {
   /** Si se da, cada fila de "próximas a vencer/vencidas" navega directo a la solicitud. */
   onNavigateToRequest?: (requestId: string) => void;
@@ -42,17 +48,14 @@ interface PurchaseDashboardProps {
 
 /** Indicadores del flujo de compras completo (sección 11 del pedido original). */
 const PurchaseDashboard: React.FC<PurchaseDashboardProps> = ({ onNavigateToRequest }) => {
-  const [requests, setRequests] = useState<PurchaseRequest[]>([]);
-  const [expiringItems, setExpiringItems] = useState<ExpiringItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const {
+    data: { requests, expiringItems },
+    loading,
+    error,
+    refresh: load,
+  } = useAsyncData<DashboardData>(
+    async () => {
       const reqData = await getPurchaseRequests();
-      setRequests(reqData);
 
       // Solo tiene sentido revisar vigencia de proformas en solicitudes que
       // todavía están en etapa de cotización/evaluación.
@@ -75,19 +78,14 @@ const PurchaseDashboard: React.FC<PurchaseDashboardProps> = ({ onNavigateToReque
           });
       });
       items.sort((a, b) => a.proforma.expiryDate.localeCompare(b.proforma.expiryDate));
-      setExpiringItems(items);
-    } catch (err) {
-      setError(getPurchaseRequestErrorMessage(err, 'No se pudo cargar el dashboard.'));
-      setRequests([]);
-      setExpiringItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+      return { requests: reqData, expiringItems: items };
+    },
+    { requests: [], expiringItems: [] },
+    {
+      errorMessage: 'No se pudo cargar el dashboard.',
+      getErrorMessage: getPurchaseRequestErrorMessage,
+    },
+  );
 
   const count = (s: PurchaseRequestStatus) => requests.filter((r) => r.status === s).length;
   const generatedOrdersCount = requests.filter((r) => !!r.generatedOrderId).length;
