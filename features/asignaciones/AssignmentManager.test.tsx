@@ -20,17 +20,27 @@ const mocks = vi.hoisted(() => ({
   getAssignmentItems: vi.fn(),
 }));
 
-vi.mock('@/shared/api/inventoryService', () => ({
-  getAssignments: mocks.getAssignments,
-  getInventory: mocks.getInventory,
-  getEmployees: mocks.getEmployees,
-  getAssignmentItems: mocks.getAssignmentItems,
-  createAssignment: vi.fn(),
-  updateAssignment: vi.fn(),
-  createAssignmentEquipo: vi.fn(),
-  updateInventoryItem: vi.fn(),
-  getInventoryErrorMessage: (_e: unknown, fallback: string) => fallback,
-}));
+vi.mock('@/shared/api/inventoryService', async (importOriginal) => {
+  // PartialWriteError se re-exporta real (no mockeada): useAssignmentManager.ts
+  // hace `new PartialWriteError(...)` en sus catch de guardado parcial, y si
+  // el mock no la exporta queda `undefined` ahí adentro — cualquier test que
+  // fuerce esa ruta crashearía con "is not a constructor" en vez de probar el
+  // manejo real.
+  const actual = await importOriginal<typeof import('@/shared/api/inventoryService')>();
+  return {
+    ...actual,
+    getAssignments: mocks.getAssignments,
+    getInventory: mocks.getInventory,
+    getEmployees: mocks.getEmployees,
+    getAssignmentItems: mocks.getAssignmentItems,
+    createAssignment: vi.fn(),
+    createAssignmentWithItems: vi.fn(),
+    updateAssignment: vi.fn(),
+    createAssignmentEquipo: vi.fn(),
+    updateInventoryItem: vi.fn(),
+    getInventoryErrorMessage: (_e: unknown, fallback: string) => fallback,
+  };
+});
 
 vi.mock('@/shared/api/photoServer', () => ({
   getLogoUrl: () => '/logo.png',
@@ -38,6 +48,14 @@ vi.mock('@/shared/api/photoServer', () => ({
 }));
 
 import AssignmentManager from '@/features/asignaciones/AssignmentManager';
+import { CurrentUserProvider } from '@/shared/auth/CurrentUserContext';
+
+const renderManager = () =>
+  render(
+    <CurrentUserProvider>
+      <AssignmentManager />
+    </CurrentUserProvider>,
+  );
 
 /**
  * La tabla de equipos que se ve en pantalla. Hace falta acotar porque el módulo
@@ -66,6 +84,7 @@ const asigBeto = makeAssignment({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
   mocks.getAssignments.mockResolvedValue([asigAna, asigBeto]);
   mocks.getEmployees.mockResolvedValue([ana, beto]);
   mocks.getInventory.mockResolvedValue([makeItem({ name: 'Notebook Dell Latitude' })]);
@@ -74,7 +93,7 @@ beforeEach(() => {
 
 describe('AssignmentManager', () => {
   it('monta y lista las asignaciones que devuelve el servicio', async () => {
-    render(<AssignmentManager />);
+    renderManager();
 
     expect(await screen.findByText('Ana Rojas')).toBeTruthy();
     expect(screen.getByText('Beto Suárez')).toBeTruthy();
@@ -82,7 +101,7 @@ describe('AssignmentManager', () => {
   });
 
   it('muestra el marcador de "sin selección" antes de elegir una asignación', async () => {
-    render(<AssignmentManager />);
+    renderManager();
 
     expect(await screen.findByText('Seleccione una asignación')).toBeTruthy();
   });
@@ -93,7 +112,7 @@ describe('AssignmentManager', () => {
       makeItem({ name: 'Cámara Canon R6', serie: 'CAM-99', assignedEmployeeId: 'emp-ana' }),
     ]);
 
-    render(<AssignmentManager />);
+    renderManager();
     await user.click(await screen.findByText('Ana Rojas'));
 
     // El detalle pide los equipos de esa asignación concreta, no de otra.
@@ -104,7 +123,7 @@ describe('AssignmentManager', () => {
 
   it('avisa cuando la asignación seleccionada no tiene equipos', async () => {
     const user = userEvent.setup();
-    render(<AssignmentManager />);
+    renderManager();
 
     await user.click(await screen.findByText('Ana Rojas'));
 
@@ -113,7 +132,7 @@ describe('AssignmentManager', () => {
 
   it('el buscador filtra la lista maestra', async () => {
     const user = userEvent.setup();
-    render(<AssignmentManager />);
+    renderManager();
     await screen.findByText('Ana Rojas');
 
     await user.type(screen.getByPlaceholderText('Buscar empleado...'), 'Beto');
@@ -125,14 +144,32 @@ describe('AssignmentManager', () => {
   it('muestra el estado vacío cuando no hay asignaciones', async () => {
     mocks.getAssignments.mockResolvedValue([]);
 
-    render(<AssignmentManager />);
+    renderManager();
 
     expect(await screen.findByText('No hay asignaciones.')).toBeTruthy();
   });
 
-  it('"Nueva Asignación" abre el formulario con el selector de equipos', async () => {
+  it('sin permiso de assignment.create, no se ve "Nueva Asignación"', async () => {
+    // Antes cualquier rol (incluido CONSULTA, el que se resuelve por
+    // defecto cuando no hay nadie elegido como "quién soy") podía crear una
+    // asignación. assignment.create en permissions.ts lo limita a SISTEMAS/
+    // ADMINISTRADOR.
+    renderManager();
+    await screen.findByText('Ana Rojas');
+
+    expect(screen.queryByRole('button', { name: /Nueva Asignación/i })).toBeNull();
+  });
+
+  it('con rol SISTEMAS, "Nueva Asignación" abre el formulario con el selector de equipos', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      ana,
+      beto,
+      makeEmployee({ id: 'emp-sistemas', name: 'Sofía Sistemas', rawRole: 'Sistemas' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-sistemas');
+
     const user = userEvent.setup();
-    render(<AssignmentManager />);
+    renderManager();
     await screen.findByText('Ana Rojas');
 
     await user.click(screen.getByRole('button', { name: /Nueva Asignación/i }));
@@ -148,7 +185,7 @@ describe('AssignmentManager', () => {
       makeItem({ name: 'Cámara Canon R6', serie: 'CAM-99', assignedEmployeeId: 'emp-ana' }),
     ]);
 
-    const { container } = render(<AssignmentManager />);
+    const { container } = renderManager();
     await user.click(await screen.findByText('Ana Rojas'));
     await tablaDeDetalle();
 
@@ -164,7 +201,7 @@ describe('AssignmentManager', () => {
   it('un fallo de carga no deja la pantalla colgada en "Cargando"', async () => {
     mocks.getAssignments.mockRejectedValue(new Error('red caída'));
 
-    render(<AssignmentManager />);
+    renderManager();
 
     await waitFor(() => expect(screen.queryByText('Cargando...')).toBeNull());
     // La cabecera sigue en pie: el módulo no se rompe entero por un fallo de red.
@@ -181,7 +218,7 @@ describe('AssignmentManager', () => {
       }),
     ]);
 
-    render(<AssignmentManager />);
+    renderManager();
     await user.click(await screen.findByText('Ana Rojas'));
 
     const fila = within(await tablaDeDetalle()).getByText('Trípode Manfrotto').closest('tr')!;

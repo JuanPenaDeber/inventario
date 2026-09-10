@@ -13,14 +13,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Assignment, Employee, InventoryItem } from '@/types';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 import {
-  createAssignment,
-  createAssignmentEquipo,
+  createAssignmentWithItems,
   getAssignmentItems,
   getAssignments,
   getEmployees,
   getInventory,
   getInventoryErrorMessage,
+  PartialWriteError,
   updateAssignment,
   updateInventoryItem,
 } from '@/shared/api/inventoryService';
@@ -32,6 +33,12 @@ import { matchesItemSearch } from '@/shared/components/ItemPicker';
 export type AssignmentViewMode = 'dashboard' | 'form';
 
 export function useAssignmentManager() {
+  const { can } = useCurrentUser();
+  // Antes cualquier rol podía crear o editar una asignación — no había
+  // ningún control. assignment.create/assignment.edit en permissions.ts ya
+  // lo limitan a SISTEMAS/ADMINISTRADOR.
+  const canCreateAssignment = can('assignment.create');
+  const canEditAssignment = can('assignment.edit');
   const [viewMode, setViewMode] = useState<AssignmentViewMode>('dashboard');
 
   const {
@@ -161,6 +168,7 @@ export function useAssignmentManager() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEditing ? !canEditAssignment : !canCreateAssignment) return;
     if (selectedItemIds.size === 0) {
       alert('Seleccione al menos un equipo.');
       return;
@@ -186,23 +194,10 @@ export function useAssignmentManager() {
 
         // Los equipos se actualizan explícitamente para que apunten al empleado
         // correcto: actualizar solo la cabecera dejaba el inventario apuntando
-        // al empleado anterior.
-        await Promise.all(
-          data.itemIds.map((itemId) =>
-            updateInventoryItem(itemId, {
-              assignedEmployeeId: data.employeeId,
-              assignedEmployeeName: data.employeeName,
-            }),
-          ),
-        );
-
-        const updatedItems = await getAssignmentItems(formId);
-        setCurrentAssignmentItems(updatedItems);
-        setSelectedAssignmentId(formId);
-      } else {
-        const newAssignment = await createAssignment(data);
-        if (newAssignment && newAssignment.id) {
-          await createAssignmentEquipo(data.itemIds, newAssignment.id);
+        // al empleado anterior. La asignación en sí ya quedó bien: si esto
+        // falla, se avisa qué exactamente no se sincronizó, en vez de reportar
+        // el guardado entero como fallido.
+        try {
           await Promise.all(
             data.itemIds.map((itemId) =>
               updateInventoryItem(itemId, {
@@ -211,8 +206,41 @@ export function useAssignmentManager() {
               }),
             ),
           );
-          setSelectedAssignmentId(newAssignment.id);
+        } catch (err) {
+          throw new PartialWriteError(
+            `La asignación "${data.name || formId}" se actualizó, pero no se pudo poner al día el ` +
+            `responsable en el inventario de todos sus equipos. Verifica manualmente los equipos de ` +
+            `la asignación ${formId}.`,
+            { cause: err },
+          );
         }
+
+        const updatedItems = await getAssignmentItems(formId);
+        setCurrentAssignmentItems(updatedItems);
+        setSelectedAssignmentId(formId);
+      } else {
+        // createAssignmentWithItems ya cubre cabecera + vínculo de equipos con
+        // su propio aviso de desincronización (ver assignmentService.ts). Acá
+        // solo falta el responsable en el inventario, que es un paso aparte.
+        const newAssignment = await createAssignmentWithItems(data);
+        try {
+          await Promise.all(
+            data.itemIds.map((itemId) =>
+              updateInventoryItem(itemId, {
+                assignedEmployeeId: data.employeeId,
+                assignedEmployeeName: data.employeeName,
+              }),
+            ),
+          );
+        } catch (err) {
+          throw new PartialWriteError(
+            `La asignación "${data.name || newAssignment.id}" y sus equipos se guardaron, pero no se ` +
+            `pudo actualizar el responsable en el inventario de todos los equipos. Verifica ` +
+            `manualmente los equipos de la asignación ${newAssignment.id}.`,
+            { cause: err },
+          );
+        }
+        setSelectedAssignmentId(newAssignment.id);
       }
 
       resetForm();
@@ -226,7 +254,7 @@ export function useAssignmentManager() {
   };
 
   const handleEditStart = async () => {
-    if (!selectedAssignment) return;
+    if (!selectedAssignment || !canEditAssignment) return;
     setIsEditing(true);
     setFormId(selectedAssignment.id);
 
@@ -300,6 +328,8 @@ export function useAssignmentManager() {
     currentAssignmentItems,
     loadingItems,
     availableItems,
+    canCreateAssignment,
+    canEditAssignment,
     // formulario
     isEditing,
     name,

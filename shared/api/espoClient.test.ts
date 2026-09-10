@@ -67,6 +67,41 @@ describe('listado paginado de EspoCRM', () => {
       expect(path).toContain('order=desc');
     }
   });
+
+  it('avisa por consola si se agotan las páginas sin terminar la lista', async () => {
+    // Fetch que SIEMPRE devuelve una página llena y nunca reporta `total`:
+    // fuerza a que el loop agote las MAX_PAGES páginas sin ninguna razón
+    // legítima para parar. Es la miniatura del bug real: una lista de más de
+    // 10.000 registros se cortaría exactamente así, en silencio, si nadie
+    // avisara.
+    const espoFetch = vi.fn(
+      async () =>
+        ({
+          json: async () => ({
+            list: Array.from({ length: ESPO_PAGE_SIZE }, (_, i) => ({ id: `id-${i}` })),
+          }),
+        }) as Response,
+    );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const listAll = createEspoList(espoFetch as never);
+
+    const result = await listAll('/CEquipo');
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('límite de'));
+    expect(result.length).toBeGreaterThan(0);
+    errorSpy.mockRestore();
+  });
+
+  it('no avisa nada cuando la lista termina de forma normal', async () => {
+    const espoFetch = fakeFetchWith(429);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const listAll = createEspoList(espoFetch as never);
+
+    await listAll('/CEquipo');
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });
 
 describe('mensajes de error', () => {

@@ -21,8 +21,29 @@
 // rotarla si hace falta. Sigue viajando en el bundle del navegador porque la
 // arquitectura completa de la app es "el navegador habla directo con
 // EspoCRM" — eso no cambia con esto, solo deja de estar copiado 4 veces.
-export const ESPOCRM_API_KEY =
-  import.meta.env.VITE_ESPOCRM_API_KEY ?? '2b4fd11376a17549cba81c63a8840727';
+//
+// SIN valor por defecto a propósito. Antes había uno embebido acá mismo, y
+// ese literal terminaba compilado en cada `dist/` sin que hiciera falta ni
+// un .env — es decir, viajaba igual aunque nadie configurara nada. Faltar la
+// variable ahora es un error explícito, pero recién al hacer la primera
+// petición (no al importar el módulo): evaluar esto al cargar rompía
+// cualquier entorno sin .env local —tests, CI, un clon nuevo— aunque esa
+// petición nunca fuera a dispararse.
+let cachedApiKey: string | undefined;
+
+export function getEspoApiKey(): string {
+  if (cachedApiKey === undefined) {
+    const raw = import.meta.env.VITE_ESPOCRM_API_KEY;
+    if (!raw) {
+      throw new Error(
+        'Falta VITE_ESPOCRM_API_KEY. Configurala en tu .env local (no se versiona — ' +
+        'ver .env.example) antes de hacer peticiones a EspoCRM.',
+      );
+    }
+    cachedApiKey = raw;
+  }
+  return cachedApiKey;
+}
 
 // Tiempo máximo de espera por petición. Sin esto, una petición colgada dejaba
 // el spinner de carga girando para siempre en vez de mostrar un error.
@@ -90,7 +111,7 @@ export function createEspoFetch(baseUrl: string) {
       const res = await fetch(`${baseUrl}${path}`, {
         ...options,
         headers: {
-          'X-Api-Key': ESPOCRM_API_KEY,
+          'X-Api-Key': getEspoApiKey(),
           'Content-Type': 'application/json',
           ...(options.headers ?? {}),
         },
@@ -129,6 +150,11 @@ export function createEspoList(espoFetch: ReturnType<typeof createEspoFetch>) {
     params: Record<string, string> = {},
   ): Promise<any[]> {
     const all: any[] = [];
+    // Ver la nota equivalente en fetchAllPages() (inventoryClient.ts): si
+    // esto sigue en `true` después del for, se acabaron las MAX_PAGES
+    // páginas sin que la lista terminara — hay más registros de los que se
+    // trajeron y esta lectura los está descartando en silencio.
+    let hitPageCeiling = true;
     for (let page = 0; page < MAX_PAGES; page++) {
       const query = new URLSearchParams({
         ...params,
@@ -139,8 +165,16 @@ export function createEspoList(espoFetch: ReturnType<typeof createEspoFetch>) {
       const data = await res.json();
       const list: any[] = Array.isArray(data) ? data : (data.list ?? []);
       all.push(...list);
-      if (list.length < ESPO_PAGE_SIZE) break;
-      if (typeof data.total === 'number' && all.length >= data.total) break;
+      if (list.length < ESPO_PAGE_SIZE) { hitPageCeiling = false; break; }
+      if (typeof data.total === 'number' && all.length >= data.total) { hitPageCeiling = false; break; }
+    }
+    if (hitPageCeiling) {
+      console.error(
+        `Se alcanzó el límite de ${MAX_PAGES} páginas en ${path} sin terminar de traer la lista ` +
+        `completa: hay MÁS de ${all.length} registros y esta lectura los está descartando en ` +
+        `silencio. Subí MAX_PAGES acá, o —mejor, si esto empieza a pasar de verdad— filtrá del lado ` +
+        `del servidor en vez de traer todo.`,
+      );
     }
     return all;
   };

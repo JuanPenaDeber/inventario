@@ -54,7 +54,7 @@ const AssignmentManager: React.FC = () => {
             >
               <ArrowLeft size={18} /> Cancelar
             </button>
-          ) : (
+          ) : m.canCreateAssignment ? (
             <button
               onClick={() => {
                 m.resetForm();
@@ -64,7 +64,7 @@ const AssignmentManager: React.FC = () => {
             >
               <Plus size={18} /> Nueva Asignación
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -138,6 +138,7 @@ const AssignmentManager: React.FC = () => {
                 items={m.currentAssignmentItems}
                 loadingItems={m.loadingItems}
                 onEdit={m.handleEditStart}
+                canEdit={m.canEditAssignment}
                 onPrint={m.handlePrint}
               />
             )}

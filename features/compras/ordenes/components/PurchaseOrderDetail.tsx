@@ -13,6 +13,7 @@
 import React from 'react';
 import { Building2, Calendar, Edit, Printer, Ban, FileText, PackageCheck } from 'lucide-react';
 import { PurchaseOrder, PurchaseOrderStatus } from '@/types';
+import { LoadingState } from '@/shared/components/ui/States';
 import { formatDate } from '@/shared/utils/reportUtils';
 import StatusChip from '@/shared/components/ui/StatusChip';
 
@@ -110,7 +111,7 @@ export const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
         {loadingDetail ? (
-          <div className="p-8 text-center text-slate-400">Cargando detalle...</div>
+          <LoadingState message="Cargando detalle..." />
         ) : (
           <table className="w-full text-left text-sm min-w-[640px]">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">

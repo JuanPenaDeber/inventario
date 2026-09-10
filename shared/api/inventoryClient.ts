@@ -17,7 +17,7 @@
 
 
 import { InventoryItem, Provider, Employee } from '@/types';
-import { ESPOCRM_API_KEY } from '@/shared/api/espoClient';
+import { getEspoApiKey } from '@/shared/api/espoClient';
 import { createCache } from '@/shared/api/cache';
 import { getPhotoUploadUrl } from '@/shared/api/photoServer';
 
@@ -27,7 +27,6 @@ export interface ApiResponse<T> {
 }
 
 // API CONFIGURATION
-const API_KEY = ESPOCRM_API_KEY;
 const BASE_URL = 'http://local.grupoeldeber.com/api/v1';
 
 export const ENDPOINTS = {
@@ -42,10 +41,12 @@ export const ENDPOINTS = {
     LOAN_CONSULT: `${BASE_URL}/prestamoequipo/consultar`
 };
 
-const HEADERS = {
-    'x-api-key': API_KEY,
+// Función, no objeto: la api key recién se lee al hacer la primera petición,
+// no al importar este módulo (ver getEspoApiKey en espoClient.ts).
+const getHeaders = () => ({
+    'x-api-key': getEspoApiKey(),
     'Content-Type': 'application/json'
-};
+});
 
 // --- API TYPES & MAPPING ---
 
@@ -144,12 +145,35 @@ export class InventoryApiError extends Error {
     }
 }
 
+/**
+ * Una escritura de varios pasos falló A MEDIAS: el registro principal ya se
+ * creó/actualizó en EspoCRM, pero un paso posterior (vincular equipos,
+ * actualizar su estado) no se pudo completar.
+ *
+ * No se intenta deshacer lo ya escrito — no hay una operación de "deshacer
+ * creación" segura contra EspoCRM (mismo criterio que generatePurchaseOrder()
+ * en purchaseRequestService.ts). En vez de un error genérico que sugiere "no
+ * pasó nada" —y que antes invitaba a reintentar y duplicar el registro—, este
+ * tipo de error dice EXACTAMENTE qué quedó desincronizado.
+ */
+export class PartialWriteError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options);
+        this.name = 'PartialWriteError';
+    }
+}
+
 /** Mensaje legible para el usuario a partir de un error de escritura. */
 export function getInventoryErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof InventoryApiError) {
         if (error.status === 403) return 'Sin permiso para esta operación. Revisa el rol del usuario API en EspoCRM.';
         if (error.status === 404) return 'El registro ya no existe en EspoCRM.';
         return `${fallback} (${error.message})`;
+    }
+    // Va ANTES del genérico: es el mensaje que dice qué quedó desincronizado,
+    // y tiene que llegar completo — no reemplazado por `fallback`.
+    if (error instanceof PartialWriteError) {
+        return error.message;
     }
     if (error instanceof DOMException && error.name === 'AbortError') {
         return 'La operación tardó demasiado y se canceló. Verifica la conexión con EspoCRM.';
@@ -164,7 +188,7 @@ async function rawRequest<T>(url: string, method: string, body?: any): Promise<T
     try {
         const response = await fetch(url, {
             method,
-            headers: HEADERS,
+            headers: getHeaders(),
             body: body ? JSON.stringify(body) : undefined,
             signal: controller.signal,
         });
@@ -216,9 +240,11 @@ export async function apiWrite<T>(url: string, method: 'POST' | 'PUT' | 'DELETE'
 // responde vacío). Sin paginar, cualquier lista más larga se cortaba EN
 // SILENCIO: el inventario mostraba 200 de 429 equipos y el Dashboard decía
 // "Total: 200" como si fuera el número real.
-const PAGE_SIZE = 200;
+export const PAGE_SIZE = 200;
 // Tope de seguridad: 50 páginas = 10.000 registros. Garantiza que el bucle
-// termine aunque el backend devuelva algo inesperado.
+// termine aunque el backend devuelva algo inesperado. Si se alcanza de
+// verdad, fetchAllPages() lo avisa por console.error (ver más abajo) en vez
+// de descartar el resto en silencio.
 const MAX_PAGES = 50;
 
 /**
@@ -232,6 +258,15 @@ const MAX_PAGES = 50;
  */
 export async function fetchAllPages<T = any>(baseUrl: string): Promise<T[] | null> {
     const all: T[] = [];
+    // Se pone en `false` en cuanto el loop termina por una razón legítima
+    // (una página corta, o `total` alcanzado, o un fallo de red ya avisado).
+    // Si sigue en `true` después del for, es porque se acabaron las
+    // MAX_PAGES páginas SIN que ninguna de esas razones se diera — es decir,
+    // hay más registros de los que se trajeron y se están descartando sin que
+    // nada lo diga. Es el mismo corte silencioso que motivó paginar en
+    // primer lugar ("se mostraban 200 de 429 equipos sin avisar"), a una
+    // escala 1000 veces mayor.
+    let hitPageCeiling = true;
     for (let page = 0; page < MAX_PAGES; page++) {
         const sep = baseUrl.includes('?') ? '&' : '?';
         const url = `${baseUrl}${sep}maxSize=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`;
@@ -239,13 +274,24 @@ export async function fetchAllPages<T = any>(baseUrl: string): Promise<T[] | nul
 
         if (!data || !Array.isArray(data.list)) {
             if (page === 0) return null;
+            // No hace falta poner hitPageCeiling en false: el `return`
+            // siguiente sale de la función antes de que el chequeo de más
+            // abajo se llegue a evaluar.
             console.warn(`Paginación interrumpida en ${baseUrl} (página ${page}). Se devuelven ${all.length} registros parciales.`);
             return all;
         }
 
         all.push(...data.list);
-        if (data.list.length < PAGE_SIZE) break;
-        if (typeof data.total === 'number' && all.length >= data.total) break;
+        if (data.list.length < PAGE_SIZE) { hitPageCeiling = false; break; }
+        if (typeof data.total === 'number' && all.length >= data.total) { hitPageCeiling = false; break; }
+    }
+    if (hitPageCeiling) {
+        console.error(
+            `Se alcanzó el límite de ${MAX_PAGES} páginas en ${baseUrl} sin terminar de traer la ` +
+            `lista completa: hay MÁS de ${all.length} registros y esta lectura los está descartando ` +
+            `en silencio. Subí MAX_PAGES acá, o —mejor, si esto empieza a pasar de verdad— filtrá del ` +
+            `lado del servidor en vez de traer todo (ver README.md, "Escalabilidad").`,
+        );
     }
     return all;
 }
@@ -303,7 +349,7 @@ export const uploadInventoryImage = async (base64Image: string): Promise<string 
         await fetch(getPhotoUploadUrl(fileName), {
             method: 'POST',
             headers: {
-                'x-api-key': API_KEY
+                'x-api-key': getEspoApiKey()
                 // Content-Type is automatically set to multipart/form-data by fetch when body is FormData
             },
             body: formData

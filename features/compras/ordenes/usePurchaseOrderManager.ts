@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PurchaseOrder } from '@/types';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 import {
   cancelPurchaseOrder,
   createPurchaseOrder,
@@ -31,6 +32,14 @@ interface Options {
 }
 
 export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch }: Options) {
+  const { can } = useCurrentUser();
+  // Antes cualquier rol (incluido CONSULTA) podía crear, editar, cancelar o
+  // recibir una orden de compra — la única regla era la máquina de estados
+  // (canEdit/canCancel/canReceive más abajo), sin ningún control de rol.
+  // order.manage/order.cancel/order.receive en permissions.ts ya lo limitan.
+  const canManageOrders = can('order.manage');
+  const canCancelOrders = can('order.cancel');
+  const canReceiveOrders = can('order.receive');
   const [viewMode, setViewMode] = useState<PurchaseOrderViewMode>('list');
 
   const {
@@ -128,11 +137,13 @@ export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch 
   // --- Acciones ---
 
   const handleCreate = () => {
+    if (!canManageOrders) return;
     setEditingOrder(null);
     setViewMode('form');
   };
 
   const handleEditStart = async (order: PurchaseOrder) => {
+    if (!canManageOrders) return;
     setLoadingDetail(true);
     setError(null);
     try {
@@ -147,6 +158,7 @@ export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch 
   };
 
   const handleSaveOrder = async (values: PurchaseOrderFormValues) => {
+    if (!canManageOrders) return;
     setSaving(true);
     setError(null);
     try {
@@ -213,6 +225,7 @@ export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch 
   };
 
   const handleCancelOrder = (order: PurchaseOrder) => {
+    if (!canCancelOrders) return;
     setConfirmState({
       message: `¿Cancelar la orden ${order.reference}? Esta acción no se puede deshacer.`,
       tone: 'danger',
@@ -222,7 +235,7 @@ export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch 
   };
 
   const handleReceive = async () => {
-    if (!selectedOrder) return;
+    if (!selectedOrder || !canReceiveOrders) return;
 
     // La cantidad recibida no puede ser negativa ni superar la solicitada.
     for (const line of selectedOrder.lines) {
@@ -282,14 +295,24 @@ export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch 
   const handlePrint = () => window.print();
 
   // Solo se recibe mercadería de una orden ya APROBADA (ver receivePurchaseOrder,
-  // que aplica la misma regla del lado del servicio).
+  // que aplica la misma regla del lado del servicio) Y con el rol adecuado.
   const canReceive =
-    !!selectedOrder && selectedOrder.status === 'APROBADA' && selectedOrder.lines.length > 0;
+    canReceiveOrders &&
+    !!selectedOrder &&
+    selectedOrder.status === 'APROBADA' &&
+    selectedOrder.lines.length > 0;
 
   // RECIBIDA y CANCELADA son estados terminales: no se editan ni se cancelan.
   const canEdit =
-    !!selectedOrder && selectedOrder.status !== 'CANCELADA' && selectedOrder.status !== 'RECIBIDA';
-  const canCancel = canEdit;
+    canManageOrders &&
+    !!selectedOrder &&
+    selectedOrder.status !== 'CANCELADA' &&
+    selectedOrder.status !== 'RECIBIDA';
+  const canCancel =
+    canCancelOrders &&
+    !!selectedOrder &&
+    selectedOrder.status !== 'CANCELADA' &&
+    selectedOrder.status !== 'RECIBIDA';
 
   return {
     viewMode,
@@ -321,6 +344,7 @@ export function usePurchaseOrderManager({ initialSearch, onConsumeInitialSearch 
     receivedQuantities,
     setReceivedQuantities,
     receiving,
+    canManageOrders,
     canReceive,
     canEdit,
     canCancel,

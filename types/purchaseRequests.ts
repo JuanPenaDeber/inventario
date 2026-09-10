@@ -54,18 +54,6 @@ export interface PurchaseRequestHistoryEntry {
   details?: string;
 }
 
-// Roles del flujo de compras (sección 10 del pedido). SIN seguridad real: es
-// un selector "actuando como" en la UI (ver PurchaseRequestManager.tsx), no
-// un sistema de autenticación. Permisos reales quedan para la Fase 4.
-export type PurchaseFlowRole = 'SOLICITANTE' | 'JEFE' | 'COMPRAS' | 'ADMINISTRADOR';
-
-export const PURCHASE_FLOW_ROLES: PurchaseFlowRole[] = [
-  'SOLICITANTE',
-  'JEFE',
-  'COMPRAS',
-  'ADMINISTRADOR',
-];
-
 export interface PurchaseRequest {
   id: string;
   code: string; // Generado automáticamente (ver purchaseRequestService.ts)

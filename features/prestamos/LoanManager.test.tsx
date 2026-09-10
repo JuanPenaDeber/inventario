@@ -40,6 +40,14 @@ vi.mock('@/shared/api/photoServer', () => ({
 }));
 
 import LoanManager from '@/features/prestamos/LoanManager';
+import { CurrentUserProvider } from '@/shared/auth/CurrentUserContext';
+
+const renderManager = () =>
+  render(
+    <CurrentUserProvider>
+      <LoanManager />
+    </CurrentUserProvider>,
+  );
 
 /**
  * Tabla de equipos del detalle en pantalla. Igual que en Asignaciones, el
@@ -73,6 +81,7 @@ const prestamoDevuelto = makeLoan({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
   mocks.getLoans.mockResolvedValue([prestamoActivo, prestamoDevuelto]);
   mocks.getEmployees.mockResolvedValue([ana, beto]);
   mocks.getInventory.mockResolvedValue([makeItem({ name: 'Notebook Dell Latitude' })]);
@@ -81,7 +90,7 @@ beforeEach(() => {
 
 describe('LoanManager', () => {
   it('monta y lista los préstamos que devuelve el servicio', async () => {
-    render(<LoanManager />);
+    renderManager();
 
     expect(await screen.findByText('Préstamo cámaras evento')).toBeTruthy();
     expect(screen.getByText('Préstamo trípodes')).toBeTruthy();
@@ -89,7 +98,7 @@ describe('LoanManager', () => {
   });
 
   it('distingue en la lista un préstamo activo de uno finalizado', async () => {
-    render(<LoanManager />);
+    renderManager();
     await screen.findByText('Préstamo cámaras evento');
 
     // El estado se lee de la fila, no de un campo oculto: es lo que decide el
@@ -103,13 +112,13 @@ describe('LoanManager', () => {
       makeLoan({ name: 'Préstamo vencido', status: 'PRESTADO', fechaEsperadaDevolucion: '2020-01-01' }),
     ]);
 
-    render(<LoanManager />);
+    renderManager();
 
     expect(await screen.findByText('VENCIDO')).toBeTruthy();
   });
 
   it('muestra el marcador de "sin selección" antes de elegir un préstamo', async () => {
-    render(<LoanManager />);
+    renderManager();
 
     expect(await screen.findByText('Seleccione un préstamo para ver detalles')).toBeTruthy();
   });
@@ -118,7 +127,7 @@ describe('LoanManager', () => {
     const user = userEvent.setup();
     mocks.getLoanItems.mockResolvedValue([makeItem({ name: 'Cámara Canon R6', serie: 'CAM-99' })]);
 
-    render(<LoanManager />);
+    renderManager();
     await user.click(await screen.findByText('Préstamo cámaras evento'));
 
     await waitFor(() => expect(mocks.getLoanItems).toHaveBeenCalledWith('loan-activo'));
@@ -127,7 +136,7 @@ describe('LoanManager', () => {
 
   it('avisa cuando el préstamo seleccionado ya no tiene equipos pendientes', async () => {
     const user = userEvent.setup();
-    render(<LoanManager />);
+    renderManager();
 
     await user.click(await screen.findByText('Préstamo cámaras evento'));
 
@@ -138,7 +147,7 @@ describe('LoanManager', () => {
 
   it('el buscador filtra la lista maestra', async () => {
     const user = userEvent.setup();
-    render(<LoanManager />);
+    renderManager();
     await screen.findByText('Préstamo cámaras evento');
 
     await user.type(screen.getByPlaceholderText('Buscar préstamo...'), 'trípodes');
@@ -150,14 +159,32 @@ describe('LoanManager', () => {
   it('muestra el estado vacío cuando no hay préstamos', async () => {
     mocks.getLoans.mockResolvedValue([]);
 
-    render(<LoanManager />);
+    renderManager();
 
     expect(await screen.findByText('No hay préstamos registrados.')).toBeTruthy();
   });
 
-  it('"Nuevo Préstamo" abre el formulario con el selector de equipos', async () => {
+  it('sin permiso de loan.create, no se ve "Nuevo Préstamo"', async () => {
+    // Antes cualquier rol (incluido CONSULTA, el que se resuelve por
+    // defecto cuando no hay nadie elegido como "quién soy") podía crear un
+    // préstamo. loan.create en permissions.ts lo limita a SISTEMAS/
+    // ADMINISTRADOR.
+    renderManager();
+    await screen.findByText('Préstamo cámaras evento');
+
+    expect(screen.queryByRole('button', { name: /Nuevo Préstamo/i })).toBeNull();
+  });
+
+  it('con rol SISTEMAS, "Nuevo Préstamo" abre el formulario con el selector de equipos', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      ana,
+      beto,
+      makeEmployee({ id: 'emp-sistemas', name: 'Sofía Sistemas', rawRole: 'Sistemas' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-sistemas');
+
     const user = userEvent.setup();
-    render(<LoanManager />);
+    renderManager();
     await screen.findByText('Préstamo cámaras evento');
 
     await user.click(screen.getByRole('button', { name: /Nuevo Préstamo/i }));
@@ -166,10 +193,49 @@ describe('LoanManager', () => {
     expect(screen.getByPlaceholderText('Ej: Préstamo Cámaras Evento X')).toBeTruthy();
   });
 
+  it('con rol SISTEMAS (sin employee.create), el formulario no ofrece crear un empleado nuevo', async () => {
+    // Antes cualquiera podía crear un empleado desde acá (prompt() sin
+    // ningún control) — CRegistroEmpleados alimenta TODOS los desplegables
+    // de la app, no sólo los de Préstamos. SISTEMAS puede crear préstamos
+    // (loan.create) pero no empleados (employee.create es solo ADMINISTRADOR).
+    mocks.getEmployees.mockResolvedValue([
+      ana,
+      beto,
+      makeEmployee({ id: 'emp-sistemas', name: 'Sofía Sistemas', rawRole: 'Sistemas' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-sistemas');
+
+    const user = userEvent.setup();
+    renderManager();
+    await screen.findByText('Préstamo cámaras evento');
+
+    await user.click(screen.getByRole('button', { name: /Nuevo Préstamo/i }));
+    await screen.findByText('Seleccionar Equipos');
+
+    expect(screen.queryByTitle('Nuevo Empleado')).toBeNull();
+  });
+
+  it('con rol ADMINISTRADOR, sí aparece la opción de crear empleado', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      ana,
+      beto,
+      makeEmployee({ id: 'emp-admin', name: 'Ana Admin', rawRole: 'Administrador' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-admin');
+
+    const user = userEvent.setup();
+    renderManager();
+    await screen.findByText('Préstamo cámaras evento');
+
+    await user.click(screen.getByRole('button', { name: /Nuevo Préstamo/i }));
+
+    expect(await screen.findByTitle('Nuevo Empleado')).toBeTruthy();
+  });
+
   it('un fallo de carga no deja la pantalla colgada en "Cargando datos..."', async () => {
     mocks.getLoans.mockRejectedValue(new Error('red caída'));
 
-    render(<LoanManager />);
+    renderManager();
 
     await waitFor(() => expect(screen.queryByText('Cargando datos...')).toBeNull());
     expect(screen.getByRole('heading', { name: 'Pañol / Préstamos' })).toBeTruthy();

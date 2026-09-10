@@ -29,6 +29,8 @@ interface LoanFormProps {
   solicitanteId: string;
   onSolicitanteChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   onAddQuickEmployee: () => void;
+  /** false para casi todos los roles — crear empleados es sólo de ADMINISTRADOR. */
+  canAddEmployee: boolean;
   borrowerContact: string;
   responsableId: string;
   onResponsableChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -61,6 +63,7 @@ export const LoanForm: React.FC<LoanFormProps> = ({
   solicitanteId,
   onSolicitanteChange,
   onAddQuickEmployee,
+  canAddEmployee,
   borrowerContact,
   responsableId,
   onResponsableChange,
@@ -127,14 +130,16 @@ export const LoanForm: React.FC<LoanFormProps> = ({
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                onClick={onAddQuickEmployee}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg"
-                title="Nuevo Empleado"
-              >
-                <UserPlus size={20} />
-              </button>
+              {canAddEmployee && (
+                <button
+                  type="button"
+                  onClick={onAddQuickEmployee}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                  title="Nuevo Empleado"
+                >
+                  <UserPlus size={20} />
+                </button>
+              )}
             </div>
           </div>
 

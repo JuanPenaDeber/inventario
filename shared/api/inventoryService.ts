@@ -32,6 +32,7 @@
 
 export {
     InventoryApiError,
+    PartialWriteError,
     getInventoryErrorMessage,
     invalidateCache,
     uploadInventoryImage,
@@ -67,5 +68,6 @@ export {
     removeAssignmentItems,
     createAssignmentEquipo,
     createAssignment,
+    createAssignmentWithItems,
     updateAssignment,
 } from '@/shared/api/assignmentService';

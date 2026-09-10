@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Employee, InventoryItem, Loan } from '@/types';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 import {
   addEmployee,
   createLoan,
@@ -29,6 +30,7 @@ import type { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 export type LoanViewMode = 'dashboard' | 'create' | 'edit';
 
 export function useLoanManager() {
+  const { can } = useCurrentUser();
   const [viewMode, setViewMode] = useState<LoanViewMode>('dashboard');
 
   const {
@@ -168,7 +170,23 @@ export function useLoanManager() {
   const handleEntregadoporChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
     setEntregadoporId(e.target.value);
 
+  // Antes cualquiera podía crear un empleado desde acá, sin ningún control —
+  // y CRegistroEmpleados es de donde salen TODOS los desplegables de la app,
+  // no sólo los de Préstamos (ver la revisión de arquitectura). `canAddEmployee`
+  // se expone para que el formulario esconda el botón; el chequeo de acá
+  // adentro es la segunda línea, por si algo lo llama sin pasar por el botón.
+  const canAddEmployee = can('employee.create');
+
+  // Antes cualquier rol podía crear, editar o registrar la devolución de un
+  // préstamo — no había ningún control. loan.create/loan.edit/loan.return en
+  // permissions.ts ya lo limitan a SISTEMAS/ADMINISTRADOR; esto hace que la
+  // interfaz (y el propio hook, como segunda línea) lo respete.
+  const canCreateLoan = can('loan.create');
+  const canEditLoan = can('loan.edit');
+  const canReturnLoan = can('loan.return');
+
   const handleAddQuickEmployee = async () => {
+    if (!canAddEmployee) return;
     const newName = prompt('Nombre del nuevo empleado:');
     if (newName) {
       const dept = prompt('Departamento:') || 'almacen';
@@ -198,6 +216,7 @@ export function useLoanManager() {
 
   const handleSaveLoan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (viewMode === 'edit' ? !canEditLoan : !canCreateLoan) return;
     if (selectedItemIds.size === 0) {
       alert('Seleccione al menos un equipo.');
       return;
@@ -245,7 +264,7 @@ export function useLoanManager() {
   };
 
   const handleEditStart = () => {
-    if (!selectedLoan) return;
+    if (!selectedLoan || !canEditLoan) return;
     setFormId(selectedLoan.id);
     setName(selectedLoan.name || '');
     setSolicitanteId(selectedLoan.solicitanteId || '');
@@ -315,7 +334,7 @@ export function useLoanManager() {
   };
 
   const handlePartialReturn = () => {
-    if (!selectedLoanId || itemsToReturn.size === 0) return;
+    if (!selectedLoanId || itemsToReturn.size === 0 || !canReturnLoan) return;
     setConfirmState({
       message: `¿Registrar la devolución de ${itemsToReturn.size} equipo(s) seleccionado(s)?`,
       confirmLabel: 'Registrar devolución',
@@ -394,6 +413,10 @@ export function useLoanManager() {
     handleResponsibleChange,
     handleEntregadoporChange,
     handleAddQuickEmployee,
+    canAddEmployee,
+    canCreateLoan,
+    canEditLoan,
+    canReturnLoan,
     handleSaveLoan,
     handleEditStart,
     resetForm,

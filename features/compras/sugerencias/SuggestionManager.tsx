@@ -10,18 +10,21 @@ import {
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { controlClass } from '@/shared/components/ui/Field';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 /**
  * Configuración de sugerencias de productos por área y cargo (Fase 4,
- * sección 7 del pedido). Pensado para el rol ADMINISTRADOR — sin seguridad
- * real, igual que "Gestionar proveedores": cualquiera con acceso a Ajustes
- * puede entrar aquí (ver README.md).
+ * sección 7 del pedido). suggestions.manage en permissions.ts lo limita a
+ * ADMINISTRADOR — antes este comentario documentaba que cualquiera con
+ * acceso a Ajustes podía entrar, sin ningún control real; ya no es el caso.
  */
 // Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
 // amber es el de este módulo.
 const inputCls = controlClass('amber') + ' mt-1';
 
 const SuggestionManager: React.FC = () => {
+  const { can } = useCurrentUser();
+  const canManage = can('suggestions.manage');
   const {
     data: suggestions,
     setData: setSuggestions,
@@ -41,7 +44,7 @@ const SuggestionManager: React.FC = () => {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!area.trim() || !position.trim() || !product.trim()) return;
+    if (!canManage || !area.trim() || !position.trim() || !product.trim()) return;
     setSaving(true);
     setError(null);
     try {
@@ -56,6 +59,7 @@ const SuggestionManager: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
+    if (!canManage) return;
     setConfirmState({
       message: '¿Eliminar esta sugerencia?',
       tone: 'danger',
@@ -90,7 +94,8 @@ const SuggestionManager: React.FC = () => {
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className={`grid grid-cols-1 gap-8 ${canManage ? 'lg:grid-cols-3' : ''}`}>
+        {canManage && (
         <div className="lg:col-span-1">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 sticky top-24">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">Nueva sugerencia</h2>
@@ -113,6 +118,7 @@ const SuggestionManager: React.FC = () => {
             </form>
           </div>
         </div>
+        )}
 
         <div className="lg:col-span-2">
           {loading ? (
@@ -139,9 +145,11 @@ const SuggestionManager: React.FC = () => {
                       <td className="px-4 py-3">{s.position}</td>
                       <td className="px-4 py-3 font-medium">{s.product}</td>
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => handleDelete(s.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                        {canManage && (
+                        <button onClick={() => handleDelete(s.id)} title="Eliminar sugerencia" className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
                           <Trash2 size={16} />
                         </button>
+                        )}
                       </td>
                     </tr>
                   ))}

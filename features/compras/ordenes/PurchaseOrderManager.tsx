@@ -73,12 +73,14 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({
             <p className="text-slate-500 text-sm">Solicitudes de compra a proveedores.</p>
           </div>
         </div>
+        {m.canManageOrders && (
         <button
           onClick={m.handleCreate}
           className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm shadow-teal-500/30"
         >
           <Plus size={18} /> Nueva Orden
         </button>
+        )}
       </div>
 
       {m.error && (

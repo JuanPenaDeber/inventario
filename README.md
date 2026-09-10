@@ -17,9 +17,15 @@ View your app in AI Studio: https://ai.studio/apps/drive/1Y39sUeTTlDqBdUuc40m35J
 2. Run the app:
    `npm run dev`
 
-Las URLs/entidades de EspoCRM tienen valores por defecto embebidos en cada
-`services/*.ts`; solo hace falta un `.env` si necesitas sobreescribir alguno
-(ver [.env](.env) para la lista completa, todos comentados).
+3. Copiá la plantilla de variables de entorno y completá la API key:
+   `cp .env.example .env`
+
+La API key de EspoCRM (`VITE_ESPOCRM_API_KEY`) es **obligatoria** — sin ella
+la app no arranca (ver [.env.example](.env.example)). Las URLs/entidades de
+EspoCRM de Compras e Incidencias tienen valores por defecto embebidos en cada
+`features/*/`; solo hace falta descomentar y ajustar en `.env` si alguna
+entidad real de tu EspoCRM se llama distinto (ver [.env.example](.env.example)
+para la lista completa, todas comentadas).
 
 Otros scripts:
 - `npm run typecheck` — corre `tsc --noEmit` (TypeScript en modo `strict`).
@@ -27,75 +33,55 @@ Otros scripts:
 
 ## Arquitectura: qué es esto y qué límites tiene
 
-**El navegador habla directo con EspoCRM.** No hay backend propio: cada
-`services/*.ts` llama a la API REST de EspoCRM desde el código que corre en
-el navegador de quien use la app. Es lo que permite que todo el proyecto sea
-`npm run build` + copiar `dist/` a cualquier hosting estático, sin servidor
-que mantener. La contrapartida:
+Para el detalle de carpetas, reglas de dependencias, contrato de errores,
+manejo de estado y roles/permisos, ver **[ARCHITECTURE.md](ARCHITECTURE.md)**
+— acá quedan solo los puntos que más importa ver antes de tocar el código:
 
-> ⚠️ **La API key de EspoCRM viaja en el bundle del navegador.** Cualquiera
-> con acceso a las devtools de un navegador que cargó la app puede extraer la
-> key y usarla directamente contra tu EspoCRM, con los mismos permisos que
-> tiene la app (crear/editar/borrar equipos, préstamos, órdenes de compra,
-> etc.). Esto es un **riesgo aceptado a propósito** mientras la app viva en
-> una red interna de confianza — es la decisión correcta para el tamaño y
-> contexto actual del proyecto, no un descuido. Si algún día esta app se
-> expone a internet abierto (fuera de la red de la empresa) o maneja datos
-> más sensibles, la corrección real es introducir un backend/proxy delgado
-> que guarde la key del lado del servidor y el frontend le hable a él en vez
-> de a EspoCRM directamente — eso es un cambio de arquitectura (deja de ser
-> "100% estático"), no un parche de código.
+> ⚠️ **La API key de EspoCRM viaja en el bundle del navegador.** No hay
+> backend propio: [shared/api/espoClient.ts](shared/api/espoClient.ts) y
+> [shared/api/inventoryClient.ts](shared/api/inventoryClient.ts) llaman a la
+> API REST de EspoCRM directo desde el navegador de quien use la app.
+> Cualquiera con acceso a las devtools puede extraer la key y usarla
+> directamente contra tu EspoCRM, con los mismos permisos que tiene la app.
+> Esto es un **riesgo aceptado a propósito** mientras la app viva en una red
+> interna de confianza. Si algún día se expone a internet abierto o maneja
+> datos más sensibles, la corrección real es un backend/proxy delgado que
+> guarde la key del lado del servidor — ver ARCHITECTURE.md §1.
 
-**Dos filosofías de manejo de errores conviven, a propósito:**
-[services/inventoryService.ts](services/inventoryService.ts) (Inventario,
-Préstamos, Asignaciones, Proveedores, Empleados) absorbe los fallos de red y
-devuelve datos de respaldo en vez de mostrar un error — es el módulo de uso
-diario más frecuente, y una caída momentánea de EspoCRM no debería dejar a
-alguien sin poder ver el inventario. Los servicios de Compras
-(`purchaseOrderService.ts`, `purchaseRequestService.ts`, `proformaService.ts`,
-`suggestionService.ts`) y `incidentsService.ts` hacen lo opuesto: lanzan el
-error y lo muestran explícitamente, porque ahí ocultar un fallo es peor (una
-aprobación u orden de compra que "parece" guardada pero no llegó a EspoCRM es
-un problema serio). Ver la nota al inicio de `inventoryService.ts` para el
-detalle.
+**Sin login real** — "quién soy" es elegir una persona de una lista (barra
+"Quién soy" arriba de cada módulo). El ROL de esa persona sí se resuelve
+automáticamente (EspoCRM, con una tabla local de respaldo) y controla qué
+botones se ven — es una capa de interfaz, no autenticación real. Ver
+ARCHITECTURE.md §12 para el detalle. Incidencias tiene además un portal
+público + login con contraseña (`VITE_ADMIN_PASSWORD`) ya construido en
+[features/incidencias/IncidentsModule.tsx](features/incidencias/IncidentsModule.tsx),
+pero **apagado** (`ENABLE_USER_PORTAL = false`): hoy ese menú va directo al
+panel administrativo, sin login — queda listo para reactivarlo el día que
+haga falta un portal donde cualquiera reporte un ticket.
 
-**Sin autenticación real en ningún módulo** (el único "candado" que existe es
-la contraseña única de Incidencias, guardada en `sessionStorage` — se salta
-con las devtools). Es una limitación conocida, no resuelta en esta pasada.
+**TypeScript corre en modo `strict`** (`tsconfig.json`).
 
-**TypeScript corre en modo `strict`** (`tsconfig.json`). Nota para quien siga
-tocando el proyecto: `@types/react`/`@types/react-dom` no estaban instalados
-antes — sin ellos, TypeScript no podía chequear nada relacionado a
-componentes/hooks (todo caía en `any` implícito). Ya están agregados como
-`devDependencies`; si algún día se actualiza React, hay que actualizarlos
-junto con `react`/`react-dom`.
-
-**Ruteo por hash de URL** (`App.tsx`, sin dependencias nuevas): cada vista
+**Ruteo por hash de URL** (`app/App.tsx`, sin dependencias nuevas): cada vista
 principal se refleja en `location.hash` (ej. `#PURCHASE_ORDERS`), así que se
 puede recargar la página, compartir un enlace, o usar el botón atrás del
 navegador sin perder la vista actual. Las pantallas de alta/edición de
 inventario (`ADD_ITEM`/`EDIT_ITEM`) quedan fuera a propósito: dependen de un
 ítem completo en memoria, no de algo serializable a una URL.
 
-**Cada vista carga su propio código bajo demanda** (`React.lazy` +
-`Suspense` en `App.tsx`) — antes todos los módulos (Compras incluido, el más
-pesado) iban en un único bundle inicial de ~735 KB aunque el usuario solo
-fuera a ver el Dashboard de inventario. El bundle inicial ahora es de ~224 KB;
-el resto se descarga solo cuando se visita cada módulo.
+**Cada vista carga su propio código bajo demanda** (`React.lazy` + `Suspense`
+en `App.tsx`), y cada módulo tiene su propio `<ErrorBoundary compact>`
+([shared/components/ErrorBoundary.tsx](shared/components/ErrorBoundary.tsx)):
+un error de render en un módulo no tapa a los demás, que siguen usables desde
+el menú de arriba.
 
-**Red de seguridad ante errores de render**: [components/ErrorBoundary.tsx](components/ErrorBoundary.tsx)
-envuelve toda la app (`index.tsx`). Antes, un error no controlado en
-cualquier componente dejaba la pantalla completamente en blanco sin aviso;
-ahora se muestra una pantalla de error con opción de recargar.
-
-**Código retirado**: `services/geminiService.ts` y la dependencia
-`@google/genai` no se usaban en ningún lado — eran un sobrante de la
-plantilla original ("AI Studio") que nunca se conectó a la app. El botón de
-"escanear código de barras" en `CameraModal.tsx` **sigue siendo una
-simulación** (genera un código aleatorio, no lee un código de barras real) —
-no se tocó porque sí está en uso desde `InventoryForm.tsx`, pero queda
-pendiente decidir si se reemplaza por una librería real de escaneo o se
-retira.
+**Código retirado**: la dependencia `@google/genai` y su servicio asociado no
+se usaban en ningún lado — eran un sobrante de la plantilla original ("AI
+Studio") que nunca se conectó a la app. El botón de "escanear código de
+barras" en [features/inventario/CameraModal.tsx](features/inventario/CameraModal.tsx)
+**sigue siendo una simulación** (genera un código aleatorio, no lee un código
+de barras real) — no se tocó porque sí está en uso desde `InventoryForm.tsx`,
+pero queda pendiente decidir si se reemplaza por una librería real de escaneo
+o se retira.
 
 ## Módulo: Solicitudes de Compra (flujo completo, Fases 1 a 4)
 
@@ -106,30 +92,32 @@ Finalización**, implementado de punta a punta:
 - **Fase 1**: creación de la solicitud, líneas de producto, envío a
   aprobación, cancelación e histórico auditable.
 - **Fase 2**: aprobación/rechazo por el jefe inmediato, con la regla de
-  auto-aprobación, y el selector ligero "Actuando como" (rol + empleado).
+  auto-aprobación. El rol de quien decide se resuelve solo desde la barra
+  "Quién soy" — ver "Sobre roles" más abajo.
 - **Fase 3**: proformas de proveedores (con archivo adjunto opcional),
   cálculo de vigencia, comparación, selección justificada y generación
-  automática de una Orden de Compra real (`services/purchaseOrderService.ts`).
+  automática de una Orden de Compra real (`features/compras/ordenes/purchaseOrderService.ts`).
 - **Fase 4**: sugerencias de productos por área/cargo (configurables), rol
   `COMPRAS`/`ADMINISTRADOR` habilitando las acciones de la Fase 3, y un
   dashboard con los indicadores del flujo completo.
 
 Vive en:
-- [types.ts](types.ts) — `PurchaseRequest`, `PurchaseRequestLine`, `PurchaseRequestHistoryEntry`, `PurchaseRequestStatus`, `Proforma`, `ProformaLine`, `ProductSuggestion`, `PurchaseFlowRole`.
-- [services/purchaseRequestService.ts](services/purchaseRequestService.ts) — capa de acceso a EspoCRM para la solicitud, aislada del resto de servicios.
-- [services/proformaService.ts](services/proformaService.ts) — proformas/cotizaciones (entidad y adjuntos aparte, aislado).
-- [services/suggestionService.ts](services/suggestionService.ts) — sugerencias de productos por área/cargo.
-- [components/PurchaseRequestManager.tsx](components/PurchaseRequestManager.tsx) — listado, búsqueda, filtros, resumen por estado, detalle, histórico y el selector "Actuando como".
-- [components/PurchaseRequestForm.tsx](components/PurchaseRequestForm.tsx) — alta/edición con líneas dinámicas y chips de sugerencias.
-- [components/ProformaPanel.tsx](components/ProformaPanel.tsx) — registro de proformas, comparación y selección (dentro del detalle de la solicitud).
-- [components/SuggestionManager.tsx](components/SuggestionManager.tsx) — configuración de sugerencias (menú Ajustes).
-- [components/PurchaseDashboard.tsx](components/PurchaseDashboard.tsx) — indicadores del flujo completo.
+- [types/purchaseRequests.ts](types/purchaseRequests.ts), [types/proformas.ts](types/proformas.ts), [types/suggestions.ts](types/suggestions.ts) — `PurchaseRequest`, `PurchaseRequestLine`, `PurchaseRequestHistoryEntry`, `PurchaseRequestStatus`, `Proforma`, `ProformaLine`, `ProductSuggestion`.
+- [features/compras/solicitudes/purchaseRequestService.ts](features/compras/solicitudes/purchaseRequestService.ts) — capa de acceso a EspoCRM para la solicitud, aislada del resto de servicios.
+- [features/compras/proformas/proformaService.ts](features/compras/proformas/proformaService.ts) — proformas/cotizaciones (entidad y adjuntos aparte, aislado).
+- [features/compras/sugerencias/suggestionService.ts](features/compras/sugerencias/suggestionService.ts) — sugerencias de productos por área/cargo.
+- [features/compras/solicitudes/PurchaseRequestManager.tsx](features/compras/solicitudes/PurchaseRequestManager.tsx) — orquestador: listado, búsqueda, filtros, resumen por estado y la barra "Quién soy" (`shared/components/CurrentUserBar.tsx`, montada en `App.tsx`).
+- [features/compras/solicitudes/components/PurchaseRequestDetail.tsx](features/compras/solicitudes/components/PurchaseRequestDetail.tsx) — detalle, decisión del jefe, histórico.
+- [features/compras/solicitudes/usePurchaseRequestManager.ts](features/compras/solicitudes/usePurchaseRequestManager.ts) — estado y acciones (hook), incluida la gate de permisos por rol.
+- [features/compras/proformas/ProformaPanel.tsx](features/compras/proformas/ProformaPanel.tsx) — registro de proformas, comparación y selección (dentro del detalle de la solicitud).
+- [features/compras/sugerencias/SuggestionManager.tsx](features/compras/sugerencias/SuggestionManager.tsx) — configuración de sugerencias (menú Ajustes, solo rol Administrador).
+- [features/compras/PurchaseDashboard.tsx](features/compras/PurchaseDashboard.tsx) — indicadores del flujo completo.
 
 ### Mejoras aplicadas tras la primera entrega
 
 - **Variables de entorno centralizadas**: todas las `VITE_*` de Órdenes de
   Compra, Solicitudes, Proformas y Sugerencias quedaron documentadas
-  (comentadas) en un solo lugar: [.env](.env).
+  (comentadas) en un solo lugar: [.env.example](.env.example).
 - **Sin truncado silencioso de listas**: `getPurchaseOrders`,
   `getPurchaseRequests` y `getProductSuggestions` recorren todas las páginas
   de EspoCRM en vez de quedarse con las primeras 200 (con un tope de
@@ -148,13 +136,14 @@ Vive en:
   solicitud lleva directo a Órdenes de Compra con la referencia ya buscada;
   el Dashboard lista las proformas próximas a vencer/vencidas con un enlace
   directo a su solicitud.
-- **[services/espoClient.ts](services/espoClient.ts)**: cliente HTTP compartido por los 4
-  servicios nuevos (antes cada uno repetía casi igual su propia clase de
-  error, su `espoFetch` y la API key). Ahora, además, **todas las peticiones
-  tienen timeout** (10s) — antes una petición colgada dejaba el spinner
-  girando para siempre en vez de mostrar un error. `inventoryService.ts` e
-  `incidentsService.ts` no se tocaron: son código previo, con su propio
-  patrón ya establecido.
+- **[shared/api/espoClient.ts](shared/api/espoClient.ts)**: cliente HTTP compartido por los
+  servicios de Compras e Incidencias (antes cada uno repetía casi igual su
+  propia clase de error, su `espoFetch` y la API key). Todas las peticiones
+  tienen timeout (10s) — antes una petición colgada dejaba el spinner
+  girando para siempre en vez de mostrar un error. `inventoryService.ts`
+  (Inventario/Préstamos/Asignaciones) usa su propio cliente
+  ([shared/api/inventoryClient.ts](shared/api/inventoryClient.ts)), con un
+  contrato de errores distinto a propósito — ver ARCHITECTURE.md §3.
 - **Anular proforma con panel propio**: reemplacé el `window.prompt()` inicial
   por un panel inline con textarea, consistente con el resto de decisiones
   del flujo (Aprobar/Rechazar/Seleccionar).
@@ -165,32 +154,42 @@ Vive en:
 
 ### Sobre roles y "quién hizo la acción"
 
-El proyecto **no tiene login ni sistema de roles hoy** (se confirmó revisando
-todo el código: cada "quién hizo esto" en Préstamos/Asignaciones es un
-`<select>` manual de empleados). Se decidió seguir el mismo modelo:
+El proyecto **sigue sin login real**, pero ya no es un `<select>` de rol
+suelto por módulo. Hay una barra global **"Quién soy"**
+([shared/components/CurrentUserBar.tsx](shared/components/CurrentUserBar.tsx),
+visible arriba de cada módulo) donde se elige una persona de una lista — nada
+más. El ROL de esa persona **no se elige, se resuelve solo**
+(`shared/auth/roleResolution.ts`): primero desde el campo de cargo de
+`CRegistroEmpleados` en EspoCRM si está poblado, si no desde una tabla local
+por nombre (`ROLE_BY_NAME`, con 3 entradas de ejemplo por reemplazar), y si
+tampoco eso resuelve nada, el rol de menor privilegio (`CONSULTA`).
 
-- **Solicitante**: se elige de una lista al crear la solicitud; su nombre
-  queda como "actor" de las acciones que él mismo realiza (crear, editar,
-  enviar a aprobación, cancelar).
-- **Jefe (aprobador)**: `PurchaseRequestManager` tiene un selector **"Actuando
-  como"** (rol + empleado, tipo `PurchaseFlowRole` en `types.ts`), persistido
-  en `sessionStorage` solo por comodidad de la pestaña actual. **No hay
-  contraseña ni validación real**: cualquiera puede elegir el rol `JEFE` y
-  cualquier empleado, y el sistema no verifica que sea realmente el
-  `jefeInmediatoId` registrado en la solicitud (si no coincide, se muestra una
-  advertencia visual, pero la acción igual se permite). Esta es la base sobre
-  la que la Fase 4 construirá permisos reales.
-- **Compras**: rol `COMPRAS` en el mismo selector — habilita registrar
-  proformas, iniciar/cerrar la etapa de cotización, comparar, seleccionar la
-  proforma ganadora y generar la Orden de Compra.
-- **Administrador**: rol `ADMINISTRADOR` — hoy solo se usa para poder
-  "Marcar como finalizada" una solicitud (junto con `COMPRAS`). La pantalla
-  "Gestionar sugerencias" (menú Ajustes) **no** está bloqueada por rol —
-  sigue el mismo criterio que "Gestionar proveedores", que tampoco lo está.
+`shared/auth/permissions.ts` tiene la matriz operación × rol (28 operaciones:
+Inventario, Préstamos, Asignaciones, Proveedores, Sugerencias, Incidencias y
+las 12 de Solicitudes/Proformas/Órdenes de Compra), y `can(operation, opts?)`
+—expuesto por `useCurrentUser()`— decide qué botones se muestran en cada
+pantalla. Los seis roles: `CONSULTA` (solo lectura, el de menor privilegio),
+`SOLICITANTE`, `SISTEMAS`, `JEFE` (aprueba solicitudes de compra de
+cualquier área), `COMPRAS` (cotización, proformas, órdenes) y
+`ADMINISTRADOR` (todo, incluido borrar equipos y crear empleados).
 
-Nada de esto es seguridad real: es deliberadamente ligero, tal como se acordó,
-para no construir un sistema de permisos completo sin autenticación real
-detrás.
+En Solicitudes de Compra puntualmente: el **Jefe** aprueba/rechaza sin
+importar si coincide con el `jefeInmediatoId` registrado en la solicitud (se
+muestra una advertencia visual, pero `permissions.ts` deja pasar a cualquier
+JEFE — no hay forma de saber "el jefe de quién" sin más datos en EspoCRM).
+**Compras** habilita registrar proformas, iniciar/cerrar la cotización,
+comparar, seleccionar la proforma ganadora y generar la Orden de Compra.
+"Marcar como finalizada" la habilitan `COMPRAS` y `ADMINISTRADOR`. Las
+pantallas "Gestionar sugerencias" y "Gestionar proveedores" (menú Ajustes)
+**sí** están bloqueadas por rol (`ADMINISTRADOR` y `COMPRAS`/`ADMINISTRADOR`
+respectivamente).
+
+**Nada de esto es seguridad real** — es deliberadamente una capa de
+interfaz, no un reemplazo de autenticación. `can()` decide qué se ve, no qué
+puede hacer de verdad quien tenga la API key de las devtools; la protección
+real, si hace falta, es el rol del usuario API en EspoCRM. Ver
+[ARCHITECTURE.md §12](ARCHITECTURE.md#12-identidad-y-roles-capa-blanda-de-ui)
+para el detalle completo.
 
 ### Estados: el flujo completo de 11 estados ya tiene acción de UI
 
@@ -253,7 +252,7 @@ Nota: el `Employee` (`CRegistroEmpleados`) actual no tiene un campo "cargo",
 así que por ahora es texto libre en el formulario, no viene del maestro de
 empleados.
 
-**Proformas** (`services/proformaService.ts`) — tampoco existen en EspoCRM.
+**Proformas** (`features/compras/proformas/proformaService.ts`) — tampoco existen en EspoCRM.
 Se asume el modelo relacional típico de EspoCRM (no JSON embebido):
 
 ```
@@ -282,7 +281,7 @@ cotizaciones recibidas queda íntegro sin necesitar auditoría de ediciones).
 falla (contrato no confirmado, backend caído), la proforma se guarda igual
 **sin adjunto** — nunca bloquea el registro.
 
-**Sugerencias** (`services/suggestionService.ts`) — entidad `CSugerenciaProducto`
+**Sugerencias** (`features/compras/sugerencias/suggestionService.ts`) — entidad `CSugerenciaProducto`
 (configurable con `VITE_SUGGESTION_ENTITY`) con `area`, `cargo`, `producto`.
 
 ### Cómo probar el módulo
@@ -295,12 +294,14 @@ falla (contrato no confirmado, backend caído), la proforma se guarda igual
 3. **Guardar borrador vs. enviar**: "Guardar borrador" deja la solicitud en
    `BORRADOR` (editable); "Enviar a aprobación" además la pasa a
    `PENDIENTE_APROBACION` (deja de ser editable).
-4. **Aprobar/Rechazar**: en la barra "Actuando como" (arriba de la lista),
-   cambia el rol a `JEFE` y elige un empleado — idealmente el mismo jefe
-   inmediato de la solicitud, aunque el sistema no lo obliga. Con la solicitud
-   en `PENDIENTE_APROBACION` seleccionada, aparece el panel "Decisión del jefe
-   inmediato": "Aprobar" (comentario opcional) o "Rechazar" (el motivo es
-   obligatorio, el botón se puede pulsar pero el servicio rechaza la llamada
+4. **Aprobar/Rechazar**: en la barra "Quién soy" (arriba de cada módulo),
+   elige un empleado cuyo rol resuelva a `JEFE` (cargo "Jefe..." en EspoCRM, o
+   agregalo a `ROLE_BY_NAME` en `shared/auth/roleResolution.ts`) — idealmente
+   el mismo jefe inmediato de la solicitud, aunque el sistema no lo obliga.
+   Con la solicitud en `PENDIENTE_APROBACION` seleccionada, aparece el panel
+   "Decisión del jefe inmediato": "Aprobar" (comentario opcional) o
+   "Rechazar" (el motivo es obligatorio, el botón se puede pulsar pero el
+   servicio rechaza la llamada
    sin motivo).
 5. **Auto-aprobación**: crea otra solicitud donde el solicitante y el jefe
    inmediato sean la **misma persona** y pulsa "Enviar a aprobación" — debe
@@ -315,12 +316,13 @@ falla (contrato no confirmado, backend caído), la proforma se guarda igual
 8. **Filtros y exportación**: búsqueda por código/solicitante/área/cargo/jefe
    /producto, filtro por estado, por rango de fecha de solicitud, y
    "Exportar Excel" para lo que esté filtrado.
-9. **Sugerencias**: en Ajustes → "Gestionar sugerencias", registra una
-   combinación área/cargo/producto. Al crear una solicitud con esa misma
-   área y cargo, aparecen chips "+ Producto" sobre el detalle de productos
-   para agregarlo con un clic.
-10. **Cotización**: cambia "Actuando como" a `COMPRAS`. Con una solicitud
-    `APROBADA` seleccionada, pulsa "Iniciar cotización" → pasa a
+9. **Sugerencias**: elige en "Quién soy" a alguien con rol `ADMINISTRADOR`,
+   entra a Ajustes → "Gestionar sugerencias" y registra una combinación
+   área/cargo/producto. Al crear una solicitud con esa misma área y cargo,
+   aparecen chips "+ Producto" sobre el detalle de productos para agregarlo
+   con un clic.
+10. **Cotización**: en "Quién soy" elige a alguien con rol `COMPRAS`. Con una
+    solicitud `APROBADA` seleccionada, pulsa "Iniciar cotización" → pasa a
     `EN_COTIZACION`. Ahí aparece "Registrar proforma": completa proveedor,
     número, fecha de emisión, días de validez (la fecha de vencimiento se
     calcula sola), moneda, descuento, impuesto, condiciones de pago, tiempo
@@ -347,10 +349,12 @@ Gestión de solicitudes de compra a proveedores (`CProveedor`), con detalle de
 productos, cálculo automático de subtotal/impuesto/total y recepción total o
 parcial. Vive en:
 
-- [types.ts](types.ts) — `PurchaseOrder`, `PurchaseOrderLine`, `PurchaseOrderStatus`.
-- [services/purchaseOrderService.ts](services/purchaseOrderService.ts) — capa de acceso a EspoCRM, aislada del resto de servicios.
-- [components/PurchaseOrderManager.tsx](components/PurchaseOrderManager.tsx) — listado, búsqueda, filtros, resumen de totales, detalle y recepción.
-- [components/PurchaseOrderForm.tsx](components/PurchaseOrderForm.tsx) — alta/edición con líneas dinámicas.
+- [types/purchaseOrders.ts](types/purchaseOrders.ts) — `PurchaseOrder`, `PurchaseOrderLine`, `PurchaseOrderStatus`.
+- [features/compras/ordenes/purchaseOrderService.ts](features/compras/ordenes/purchaseOrderService.ts) — capa de acceso a EspoCRM, aislada del resto de servicios.
+- [features/compras/ordenes/PurchaseOrderManager.tsx](features/compras/ordenes/PurchaseOrderManager.tsx) — orquestador: listado, búsqueda, filtros, resumen de totales.
+- [features/compras/ordenes/usePurchaseOrderManager.ts](features/compras/ordenes/usePurchaseOrderManager.ts) — estado y acciones (hook), incluida la gate de permisos por rol (`order.manage`/`order.cancel`/`order.receive`, solo `COMPRAS`/`ADMINISTRADOR`, `order.receive` también `SISTEMAS`).
+- [features/compras/ordenes/PurchaseOrderForm.tsx](features/compras/ordenes/PurchaseOrderForm.tsx) — alta/edición con líneas dinámicas.
+- [features/compras/ordenes/components/PurchaseOrderDetail.tsx](features/compras/ordenes/components/PurchaseOrderDetail.tsx) — detalle y recepción.
 
 Estados del flujo: `BORRADOR → SOLICITADA → APROBADA → RECIBIDA`, con `CANCELADA`
 disponible desde cualquier estado excepto `RECIBIDA`. No hay borrado físico: la
@@ -416,7 +420,10 @@ enlace futuro; falta confirmar con el backend cómo debe crearse el equipo
 2. En el menú superior (o el menú móvil), abre **"Órdenes de compra"**.
 3. Si el backend de EspoCRM no está disponible o la entidad `COrdenCompra`
    no existe todavía, verás un listado vacío con un aviso de error — es
-   esperado mientras el contrato de arriba no esté confirmado.
+   esperado mientras el contrato de arriba no esté confirmado. Crear, editar,
+   cancelar o recibir requiere rol `COMPRAS` o `ADMINISTRADOR` (recibir
+   también admite `SISTEMAS`) — elegí un empleado con ese rol en la barra
+   "Quién soy" antes de seguir, o "Nueva Orden" no va a aparecer.
 4. **Crear**: botón "Nueva Orden" → completa referencia, proveedor, fechas,
    solicitante, moneda e impuesto → agrega una o más líneas de producto →
    el subtotal/impuesto/total se recalculan solos. Intentar guardar con

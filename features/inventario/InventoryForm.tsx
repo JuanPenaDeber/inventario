@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Camera, Building2, UserCheck, Upload, Image as ImageIcon, AlertTriangle, FileText, Check } from 'lucide-react';
 import { InventoryItem, Provider, Employee } from '@/types';
-import { getProviders, getEmployees, createAssignment, createAssignmentEquipo } from '@/shared/api/inventoryService';
+import { getProviders, getEmployees, createAssignmentWithItems, getInventoryErrorMessage } from '@/shared/api/inventoryService';
 import { getPhotoUrl } from '@/shared/api/photoServer';
 import CameraModal from '@/features/inventario/CameraModal';
 import { controlClass } from '@/shared/components/ui/Field';
@@ -166,19 +166,22 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
                 itemIds: [initialData.id]
             };
 
-            const newAsn = await createAssignment(assignmentData);
-            if (newAsn && newAsn.id) {
-                await createAssignmentEquipo(assignmentData.itemIds, newAsn.id);
-            }
+            // Cabecera + vínculo de equipos en un solo paso, con su propio
+            // aviso si el segundo falla habiendo ya creado el acta (ver
+            // PartialWriteError en assignmentService.ts). No se le pasa
+            // employeeId/employeeName: el responsable del equipo ya se
+            // escribe aparte, en processSave() de abajo — duplicarlo acá
+            // sería la misma escritura dos veces.
+            await createAssignmentWithItems(assignmentData);
         }
-        
+
         // After creating assignment, proceed to save the item changes
         processSave();
         setShowAssignmentModal(false);
 
     } catch (error) {
         console.error("Error creating assignment", error);
-        alert("Error al generar el acta de asignación.");
+        alert(getInventoryErrorMessage(error, "Error al generar el acta de asignación."));
     } finally {
         setIsSavingAssignment(false);
     }

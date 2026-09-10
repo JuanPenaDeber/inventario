@@ -10,11 +10,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { makeOrderLine, makePurchaseOrder } from '@/shared/test/fixtures';
+import { makeEmployee, makeOrderLine, makePurchaseOrder } from '@/shared/test/fixtures';
 
 const mocks = vi.hoisted(() => ({
   getPurchaseOrders: vi.fn(),
   getPurchaseOrder: vi.fn(),
+  getEmployees: vi.fn(),
+  getProviders: vi.fn(),
+}));
+
+vi.mock('@/shared/api/inventoryService', () => ({
+  getEmployees: mocks.getEmployees,
+  getProviders: mocks.getProviders,
 }));
 
 vi.mock('@/features/compras/ordenes/purchaseOrderService', async (importOriginal) => {
@@ -39,6 +46,17 @@ vi.mock('@/shared/api/photoServer', () => ({
 }));
 
 import PurchaseOrderManager from '@/features/compras/ordenes/PurchaseOrderManager';
+import { CurrentUserProvider } from '@/shared/auth/CurrentUserContext';
+
+const renderManager = (initialSearch?: string, onConsumeInitialSearch?: () => void) =>
+  render(
+    <CurrentUserProvider>
+      <PurchaseOrderManager
+        initialSearch={initialSearch}
+        onConsumeInitialSearch={onConsumeInitialSearch}
+      />
+    </CurrentUserProvider>,
+  );
 
 /** Tabla de líneas en pantalla: "Solicitado" no existe en la orden imprimible. */
 const tablaDeLineas = async (): Promise<HTMLElement> =>
@@ -62,16 +80,19 @@ const ordenAprobada = makePurchaseOrder({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
   mocks.getPurchaseOrders.mockResolvedValue([ordenBorrador, ordenAprobada]);
   mocks.getPurchaseOrder.mockResolvedValue({
     ...ordenBorrador,
     lines: [makeOrderLine({ description: 'Monitor 24 pulgadas', category: 'Computadoras' })],
   });
+  mocks.getEmployees.mockResolvedValue([]);
+  mocks.getProviders.mockResolvedValue([]);
 });
 
 describe('PurchaseOrderManager', () => {
   it('monta y lista las órdenes que devuelve el servicio', async () => {
-    render(<PurchaseOrderManager />);
+    renderManager();
 
     expect(await screen.findByText('OC-2025-001')).toBeTruthy();
     expect(screen.getByText('OC-2025-002')).toBeTruthy();
@@ -79,7 +100,7 @@ describe('PurchaseOrderManager', () => {
   });
 
   it('muestra el estado de cada orden en su fila', async () => {
-    render(<PurchaseOrderManager />);
+    renderManager();
     await screen.findByText('OC-2025-001');
 
     // Acotado a `span`: cada estado aparece también como <option> del filtro
@@ -89,14 +110,14 @@ describe('PurchaseOrderManager', () => {
   });
 
   it('muestra el marcador de "sin selección" antes de elegir una orden', async () => {
-    render(<PurchaseOrderManager />);
+    renderManager();
 
     expect(await screen.findByText('Selecciona una orden para ver el detalle')).toBeTruthy();
   });
 
   it('al seleccionar una orden pide su detalle completo y muestra las líneas', async () => {
     const user = userEvent.setup();
-    render(<PurchaseOrderManager />);
+    renderManager();
 
     await user.click(await screen.findByText('OC-2025-001'));
 
@@ -107,7 +128,7 @@ describe('PurchaseOrderManager', () => {
 
   it('el buscador filtra la lista maestra', async () => {
     const user = userEvent.setup();
-    render(<PurchaseOrderManager />);
+    renderManager();
     await screen.findByText('OC-2025-001');
 
     await user.type(
@@ -122,14 +143,31 @@ describe('PurchaseOrderManager', () => {
   it('muestra el estado vacío cuando no hay órdenes', async () => {
     mocks.getPurchaseOrders.mockResolvedValue([]);
 
-    render(<PurchaseOrderManager />);
+    renderManager();
 
     expect(await screen.findByText('No hay órdenes de compra registradas.')).toBeTruthy();
   });
 
-  it('"Nueva Orden" abre el formulario', async () => {
+  it('sin permiso de order.manage, no se ve "Nueva Orden"', async () => {
+    // Antes cualquier rol (incluido CONSULTA, el que se resuelve por
+    // defecto cuando no hay nadie elegido como "quién soy") podía crear,
+    // editar, cancelar o recibir una orden — la única regla era la máquina
+    // de estados, sin ningún control de rol. order.manage en permissions.ts
+    // lo limita a COMPRAS/ADMINISTRADOR.
+    renderManager();
+    await screen.findByText('OC-2025-001');
+
+    expect(screen.queryByRole('button', { name: /Nueva Orden/i })).toBeNull();
+  });
+
+  it('con rol COMPRAS, "Nueva Orden" abre el formulario', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      makeEmployee({ id: 'emp-compras', name: 'Carla Compras', rawRole: 'Compras' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-compras');
+
     const user = userEvent.setup();
-    render(<PurchaseOrderManager />);
+    renderManager();
     await screen.findByText('OC-2025-001');
 
     await user.click(screen.getByRole('button', { name: /Nueva Orden/i }));
@@ -143,7 +181,7 @@ describe('PurchaseOrderManager', () => {
     // OC-2025-002". Si se pierde al refactorizar, esa navegación entre módulos
     // deja de funcionar sin que nada falle a la vista.
     const onConsume = vi.fn();
-    render(<PurchaseOrderManager initialSearch="OC-2025-002" onConsumeInitialSearch={onConsume} />);
+    renderManager("OC-2025-002", onConsume);
 
     expect(await screen.findByText('OC-2025-002')).toBeTruthy();
     expect(screen.queryByText('OC-2025-001')).toBeNull();
@@ -152,7 +190,7 @@ describe('PurchaseOrderManager', () => {
 
   it('la orden imprimible lleva la referencia, las líneas y las dos firmas', async () => {
     const user = userEvent.setup();
-    const { container } = render(<PurchaseOrderManager />);
+    const { container } = renderManager();
 
     await user.click(await screen.findByText('OC-2025-001'));
     await tablaDeLineas();
@@ -173,7 +211,7 @@ describe('PurchaseOrderManager', () => {
   it('un fallo de carga muestra el aviso y no deja la pantalla cargando', async () => {
     mocks.getPurchaseOrders.mockRejectedValue(new Error('red caída'));
 
-    render(<PurchaseOrderManager />);
+    renderManager();
 
     await waitFor(() => expect(screen.queryByText('Cargando órdenes...')).toBeNull());
     expect(screen.getByRole('heading', { name: 'Órdenes de Compra' })).toBeTruthy();

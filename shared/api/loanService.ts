@@ -14,6 +14,7 @@ import {
     cached,
     fetchAllPages,
     mapApiItemToInventory,
+    PartialWriteError,
 } from '@/shared/api/inventoryClient';
 import { getInventory, updateInventoryItem } from '@/shared/api/catalogService';
 
@@ -85,19 +86,34 @@ export const createLoan = async (loanData: any): Promise<Loan> => {
   const savedLoan = await apiWrite<Loan>(ENDPOINTS.LOANS, 'POST', newLoanHeader);
   const loanId = savedLoan.id;
 
-  // Add items via sub-resource
+  // El préstamo YA se creó en este punto. Si lo que sigue falla —vincular los
+  // equipos o marcarlos 'En Prestamo'— no se deshace (no hay una operación de
+  // "deshacer creación" segura contra EspoCRM). Antes, un fallo acá se
+  // reportaba como "no se pudo guardar el préstamo", que era falso: el
+  // préstamo existía, y el equipo quedaba con status 'Activo' — es decir,
+  // prestable de nuevo, a pesar de estar ya prestado en este mismo registro.
+  // Ver PartialWriteError en inventoryClient.ts.
   if (loanData.itemIds && loanData.itemIds.length > 0) {
-      await createLoanItems(loanData.itemIds, loanId);
-      
-      // Update item status locally (optional side effect handling)
-      const items = await getInventory();
-      const updatePromises = loanData.itemIds.map(async (itemId: string) => {
-          const item = items.find(i => i.id === itemId);
-          if (item) {
-              await updateInventoryItem(item.id, { status: 'En Prestamo' });
-          }
-      });
-      await Promise.all(updatePromises);
+      try {
+          await createLoanItems(loanData.itemIds, loanId);
+
+          const items = await getInventory();
+          const updatePromises = loanData.itemIds.map(async (itemId: string) => {
+              const item = items.find(i => i.id === itemId);
+              if (item) {
+                  await updateInventoryItem(item.id, { status: 'En Prestamo' });
+              }
+          });
+          await Promise.all(updatePromises);
+      } catch (err) {
+          throw new PartialWriteError(
+              `El préstamo "${loanData.name || loanId}" se registró, pero no se pudo vincular o ` +
+              `actualizar el estado de sus equipos (quedaron desincronizados). Verifica manualmente ` +
+              `el préstamo ${loanId} y los equipos seleccionados antes de reintentar — podrían ` +
+              `figurar como disponibles sin estarlo.`,
+              { cause: err },
+          );
+      }
   }
 
   return savedLoan;

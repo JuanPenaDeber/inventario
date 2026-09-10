@@ -14,6 +14,7 @@ import {
     cached,
     fetchAllPages,
     mapApiItemToInventory,
+    PartialWriteError,
     type ApiResponse,
 } from '@/shared/api/inventoryClient';
 
@@ -78,6 +79,42 @@ export const createAssignment = async (data: any): Promise<Assignment> => {
   // Los equipos de la asignación se enlazan aparte (createAssignmentEquipo),
   // no aquí, para no competir con esa llamada.
   return apiWrite<Assignment>(ENDPOINTS.ASSIGNMENTS, 'POST', newAssignment);
+};
+
+/**
+ * Crea la asignación y vincula sus equipos en un solo paso. Reúne lo que antes
+ * vivía duplicado, carácter por carácter, en useAssignmentManager.ts e
+ * InventoryForm.tsx.
+ *
+ * Igual que createLoan(): si vincular los equipos falla DESPUÉS de crear la
+ * cabecera, no se deshace la cabecera (no hay una operación de "deshacer
+ * creación" segura contra EspoCRM) — se avisa exactamente qué quedó
+ * desincronizado en vez de un error genérico. Ver PartialWriteError.
+ *
+ * No toca el campo `assignedEmployeeId` de cada equipo: eso es un paso
+ * separado y opcional que cada llamador maneja según su caso — InventoryForm
+ * ya lo escribe por su cuenta al guardar el equipo, y duplicarlo aquí sería
+ * una escritura redundante.
+ */
+export const createAssignmentWithItems = async (
+    data: Record<string, any> & { itemIds: string[] },
+): Promise<Assignment> => {
+    const newAssignment = await createAssignment(data);
+
+    if (data.itemIds.length > 0) {
+        try {
+            await createAssignmentEquipo(data.itemIds, newAssignment.id);
+        } catch (err) {
+            throw new PartialWriteError(
+                `La asignación "${data.name || newAssignment.id}" se creó, pero no se pudo vincular ` +
+                `ninguno de los equipos seleccionados (quedó sin equipos). Verifica manualmente la ` +
+                `asignación ${newAssignment.id} antes de reintentar.`,
+                { cause: err },
+            );
+        }
+    }
+
+    return newAssignment;
 };
 
 export const updateAssignment = async (id: string, updates: Partial<Assignment> & { itemIds?: string[] }): Promise<Assignment | null> => {

@@ -25,6 +25,7 @@ import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { today, daysAgo, isWithinDateRange, formatDateTime } from '@/shared/utils/reportUtils';
 import { usePagination } from '@/shared/hooks/usePagination';
 import TablePagination from '@/shared/components/TablePagination';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 interface DashboardFilters {
   startDate: string;
@@ -49,6 +50,12 @@ const inputBase =
 
 /** Panel administrativo de incidencias: filtros, tabla, edición y exportación. */
 export default function IncidentsAdmin() {
+  const { can } = useCurrentUser();
+  // Este panel documentaba "solo lo usan administradores" como si fuera una
+  // regla, pero no había ningún control real — cualquier rol que llegara acá
+  // podía editar el estado de una incidencia. incident.manage en
+  // permissions.ts ya lo limita a SISTEMAS/ADMINISTRADOR.
+  const canManage = can('incident.manage');
   const {
     data: incidents,
     setData: setIncidents,
@@ -157,7 +164,7 @@ export default function IncidentsAdmin() {
           <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-blue-600" />
         </div>
       ) : (
-        <IncidentsTable incidents={filtered} onEdit={setEditing} />
+        <IncidentsTable incidents={filtered} onEdit={setEditing} canManage={canManage} />
       )}
 
       <EditIncidentModal
@@ -330,11 +337,13 @@ function StatCards({ incidents }: { incidents: Incident[] }) {
 interface IncidentsTableProps {
   incidents: Incident[];
   onEdit: (incident: Incident) => void;
+  /** incident.manage en permissions.ts — SISTEMAS/ADMINISTRADOR. */
+  canManage: boolean;
 }
 
 const ROWS_OPTIONS = [10, 25, 50];
 
-function IncidentsTable({ incidents, onEdit }: IncidentsTableProps) {
+function IncidentsTable({ incidents, onEdit, canManage }: IncidentsTableProps) {
   // Paginación (shared/hooks/usePagination.ts). El hook acota solo la página
   // fuera de rango, cosa que esta copia no hacía: al reducirse la lista por un
   // filtro, la tabla quedaba en blanco hasta el siguiente reset.
@@ -393,6 +402,7 @@ function IncidentsTable({ incidents, onEdit }: IncidentsTableProps) {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
+                    {canManage && (
                     <button
                       onClick={() => onEdit(inc)}
                       title="Editar"
@@ -400,6 +410,7 @@ function IncidentsTable({ incidents, onEdit }: IncidentsTableProps) {
                     >
                       <Pencil size={16} />
                     </button>
+                    )}
                   </td>
                 </tr>
               ))

@@ -8,23 +8,40 @@
 // el comparador, y caía en silencio al orden por fecha.
 // =============================================================================
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { makeItem } from '@/shared/test/fixtures';
+import { makeEmployee, makeItem } from '@/shared/test/fixtures';
 
 vi.mock('@/shared/api/photoServer', () => ({
   getPhotoUrl: (f?: string) => (f ? `/fotos/${f}` : ''),
   getLogoUrl: () => '/logo.png',
 }));
 
+const mocks = vi.hoisted(() => ({ getEmployees: vi.fn() }));
+
+// Dashboard usa useCurrentUser() para esconder "Eliminar" sin permiso — el
+// Provider pide getEmployees() al montar, así que hace falta un doble.
+vi.mock('@/shared/api/inventoryService', () => ({
+  getEmployees: mocks.getEmployees,
+}));
+
 import Dashboard from '@/features/inventario/Dashboard';
+import { CurrentUserProvider } from '@/shared/auth/CurrentUserContext';
 
 const noop = () => {};
 
+beforeEach(() => {
+  mocks.getEmployees.mockReset();
+  mocks.getEmployees.mockResolvedValue([]);
+  sessionStorage.clear();
+});
+
 const renderDashboard = (items = [makeItem()]) =>
   render(
-    <Dashboard items={items} onAddItem={noop} onEditItem={noop} onDeleteItem={noop} />,
+    <CurrentUserProvider>
+      <Dashboard items={items} onAddItem={noop} onEditItem={noop} onDeleteItem={noop} />
+    </CurrentUserProvider>,
   );
 
 /** Filas de datos de la tabla (excluye la fila de cabecera). */
@@ -143,5 +160,87 @@ describe('Dashboard', () => {
     );
 
     expect(screen.queryByLabelText('Filas por página')).toBeNull();
+  });
+
+  it('sin permiso de administrador, no se ve "Eliminar" en ninguna fila', async () => {
+    // Antes cualquiera podía borrar cualquier equipo. Por defecto (nadie
+    // elegido como "quién soy") el rol resuelto es CONSULTA, que no tiene
+    // inventory.delete — el botón no debería aparecer.
+    renderDashboard([makeItem({ name: 'Notebook Dell', serie: 'SN-1' })]);
+
+    await screen.findByText('Notebook Dell');
+    expect(screen.queryByText('Eliminar')).toBeNull();
+  });
+
+  it('con rol ADMINISTRADOR, "Eliminar" sí aparece', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      makeEmployee({ id: 'emp-admin', name: 'Ana Admin', rawRole: 'Administrador' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-admin');
+
+    renderDashboard([makeItem({ name: 'Notebook Dell', serie: 'SN-1' })]);
+
+    await screen.findByText('Notebook Dell');
+    expect(await screen.findByText('Eliminar')).toBeTruthy();
+  });
+
+  it('sin permiso de inventory.create, no se ve "Agregar equipo"', async () => {
+    // Antes cualquier rol podía abrir el formulario de alta. Por defecto
+    // (CONSULTA) inventory.create requiere SISTEMAS/ADMINISTRADOR.
+    renderDashboard([makeItem({ name: 'Notebook Dell', serie: 'SN-1' })]);
+
+    await screen.findByText('Notebook Dell');
+    expect(screen.queryByText('Agregar equipo')).toBeNull();
+  });
+
+  it('con rol SISTEMAS, "Agregar equipo" sí aparece y dispara onAddItem', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      makeEmployee({ id: 'emp-sistemas', name: 'Sofía Sistemas', rawRole: 'Sistemas' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-sistemas');
+    const onAddItem = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CurrentUserProvider>
+        <Dashboard items={[makeItem({ name: 'Notebook Dell', serie: 'SN-1' })]} onAddItem={onAddItem} onEditItem={noop} onDeleteItem={noop} />
+      </CurrentUserProvider>,
+    );
+
+    await user.click(await screen.findByText('Agregar equipo'));
+    expect(onAddItem).toHaveBeenCalledOnce();
+  });
+
+  it('sin permiso de inventory.edit, hacer clic en una fila no dispara onEditItem', async () => {
+    // Antes cualquier rol podía abrir cualquier fila para editarla.
+    const onEditItem = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CurrentUserProvider>
+        <Dashboard items={[makeItem({ name: 'Notebook Dell', serie: 'SN-1' })]} onAddItem={noop} onEditItem={onEditItem} onDeleteItem={noop} />
+      </CurrentUserProvider>,
+    );
+
+    await user.click(await screen.findByText('Notebook Dell'));
+    expect(onEditItem).not.toHaveBeenCalled();
+  });
+
+  it('con rol ADMINISTRADOR, hacer clic en una fila dispara onEditItem', async () => {
+    mocks.getEmployees.mockResolvedValue([
+      makeEmployee({ id: 'emp-admin', name: 'Ana Admin', rawRole: 'Administrador' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-admin');
+    const onEditItem = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CurrentUserProvider>
+        <Dashboard items={[makeItem({ name: 'Notebook Dell', serie: 'SN-1' })]} onAddItem={noop} onEditItem={onEditItem} onDeleteItem={noop} />
+      </CurrentUserProvider>,
+    );
+
+    await user.click(await screen.findByText('Notebook Dell'));
+    expect(onEditItem).toHaveBeenCalledOnce();
   });
 });

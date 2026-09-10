@@ -117,7 +117,8 @@ arreglo fueron cuatro líneas en `.env` en vez de tocar código.
 
 No hay store global ni librería de estado. No hace falta: cada módulo es
 autónomo y lo único que cruza fronteras es la navegación entre Solicitudes y
-Órdenes de Compra, que son dos props en `app/App.tsx`.
+Órdenes de Compra (dos props en `app/App.tsx`) y la identidad del usuario
+actual (ver §12).
 
 | Tipo | Dónde vive |
 |---|---|
@@ -125,7 +126,7 @@ autónomo y lo único que cruza fronteras es la navegación entre Solicitudes y
 | Local / UI state | `useState` dentro del componente |
 | Derived state | `useMemo`, nunca duplicado en `useState` |
 | Form state | `useState` en el formulario |
-| Global | solo `purchaseNav` en `App.tsx` (navegación cruzada) |
+| Global | `purchaseNav` en `App.tsx` (navegación cruzada); `CurrentUserContext` (identidad — única excepción deliberada a "sin store global", ver §12) |
 
 ### `useAsyncData`
 
@@ -219,10 +220,54 @@ Las cuatro deben pasar antes de dar un cambio por terminado.
 
 ## 11. Deuda técnica conocida
 
-- Layout maestro-detalle duplicado en 4 managers. Extraer un `<MasterDetail>`
-  cuando llegue el quinto módulo, no antes.
-- El selector de equipos está copiado entre Préstamos y Asignaciones.
-- Vista de impresión repetida en 3 módulos.
-- `LoanManager` (858 líneas) y `PurchaseRequestManager` (789) mezclan lista,
-  formulario, detalle e impresión en un solo archivo.
+- Vista de impresión repetida en 3 módulos (`AssignmentPrintDoc`,
+  `PurchaseOrderPrintDoc`, `LoanPrintDoc`) — cada una con su propio
+  maquetado, sin un componente compartido todavía.
 - Filtrado en el cliente (ver §7).
+- `can()` (§12) solo está conectado en la mayoría de las operaciones de
+  escritura de cada módulo, no en el 100% de la matriz de permisos — las
+  lecturas (`*.view`) casi todas quedan abiertas a todo rol a propósito.
+- La tabla local `ROLE_BY_NAME` (`shared/auth/roleResolution.ts`) todavía
+  tiene las 3 entradas de ejemplo sin reemplazar por nombres reales.
+
+Resuelto en una intervención posterior a cuando se escribió este documento —
+ya no es deuda: el layout maestro-detalle se extrajo a `<MasterDetail>`
+(usado por los 4 managers), el selector de equipos a `<ItemPicker>`
+(compartido entre Préstamos y Asignaciones), y `LoanManager`/
+`PurchaseRequestManager` se partieron en form/detail/print + un hook de
+estado cada uno (quedaron en ~200 líneas cada archivo orquestador).
+
+## 12. Identidad y roles (capa blanda de UI)
+
+Sin login real todavía: "quién soy" sigue siendo elegir una persona de una
+lista (`CurrentUserBar`, montada una vez en `App.tsx`, visible en todos los
+módulos). Lo que sí cambió es que el ROL ya no se elige — se **resuelve**, en
+`shared/auth/roleResolution.ts`, en este orden, deteniéndose en el primero que
+dé resultado:
+
+1. **EspoCRM** — si `CRegistroEmpleados` trae un campo de rol/cargo poblado
+   (`Employee.rawRole`), se interpreta ese texto (`interpretRawRole`, con
+   normalización de tildes/mayúsculas y keywords como "jefe"/"compras";
+   "jefe" gana sobre el departamento — un "Jefe de Compras" es JEFE, no
+   COMPRAS).
+2. **Tabla local por nombre** — `ROLE_BY_NAME` en el mismo archivo, plan B
+   mientras EspoCRM no tenga ese campo poblado para todos.
+3. **`DEFAULT_ROLE` (`CONSULTA`)** — el rol de menor privilegio, si ninguno de
+   los dos anteriores resolvió nada.
+
+`shared/auth/CurrentUserContext.tsx` expone `role` y `can(operation, opts?)` a
+toda la app vía Context — la única excepción deliberada a "sin store global"
+(§4): la identidad de quien usa el navegador necesita leerse desde cualquier
+punto del árbol, no es estado de un módulo. `shared/auth/permissions.ts` tiene
+la matriz operación × rol (28 operaciones, 6 roles); `opts.isOwn` deja pasar
+además a quien sea dueño del registro (ej. el Solicitante editando su propia
+solicitud en BORRADOR).
+
+**Esto es una capa "blanda", no seguridad real** — mismo espíritu que la
+advertencia de la API key en §1. `can()` decide qué botón se muestra (y una
+segunda vez, dentro del handler, por si se llega ahí sin pasar por el botón),
+no qué puede hacer de verdad quien tenga la API key en las devtools. La
+protección real, el día que haga falta, es el rol del usuario API en EspoCRM
+(ACL del lado del servidor). El día que haya login real, solo cambia
+`CurrentUserContext.tsx` (de dónde sale `currentEmployeeId`); `resolveRole()`,
+`can()` y todo lo que los consume queda igual.

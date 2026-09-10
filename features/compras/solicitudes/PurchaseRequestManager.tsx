@@ -108,11 +108,6 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
       )}
 
       <PurchaseRequestFilters
-        employees={m.employees}
-        actingRole={m.actingRole}
-        onActingRoleChange={m.setActingRole}
-        actingEmployeeId={m.actingEmployeeId}
-        onActingEmployeeChange={m.setActingEmployeeId}
         search={m.search}
         onSearchChange={m.setSearch}
         statusFilter={m.statusFilter}

@@ -11,7 +11,7 @@ import {
   AlertTriangle,
   Ban,
 } from 'lucide-react';
-import { Provider, PurchaseRequest, PurchaseFlowRole, Proforma, ProformaLine } from '@/types';
+import { Provider, PurchaseRequest, Role, Proforma, ProformaLine } from '@/types';
 import { getProviders } from '@/shared/api/inventoryService';
 import {
   getProformas,
@@ -37,6 +37,8 @@ import {
 import { formatDate } from '@/shared/utils/reportUtils';
 import { controlClass, labelClass } from '@/shared/components/ui/Field';
 import StatusChip from '@/shared/components/ui/StatusChip';
+import { LoadingState } from '@/shared/components/ui/States';
+import { can } from '@/shared/auth/permissions';
 
 const VALIDITY_CHIP: Record<string, string> = {
   VIGENTE: 'text-emerald-600 border-emerald-300 bg-emerald-50',
@@ -51,7 +53,7 @@ const VALIDITY_LABEL: Record<string, string> = {
 
 interface ProformaPanelProps {
   request: PurchaseRequest;
-  actingRole: PurchaseFlowRole;
+  actingRole: Role;
   actingEmployeeName: string;
   /** Se llama cuando una acción cambia el estado/datos de la solicitud (recarga en el padre). */
   onRequestUpdated: (updated: PurchaseRequest) => void;
@@ -328,14 +330,27 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
     }
   };
 
-  const isCompras = actingRole === 'COMPRAS';
+  // Antes cada uno comparaba `actingRole === 'COMPRAS'` a mano, lo que dejaba
+  // afuera a ADMINISTRADOR pese a que permissions.ts ya lo lista junto a
+  // COMPRAS en cada una de estas operaciones — un Administrador no podía
+  // cargar una proforma ni iniciar cotización, sólo "Finalizar" lo tenía
+  // bien. Ahora las seis usan la misma matriz de permisos que el resto de
+  // la app, así que no pueden volver a divergir en silencio.
   const activeProformas = proformas.filter((p) => !p.voided);
-  const canAddProforma = isCompras && (request.status === 'EN_COTIZACION' || request.status === 'COTIZADA');
-  const canStartQuotation = isCompras && request.status === 'APROBADA';
-  const canMarkAsQuoted = isCompras && request.status === 'EN_COTIZACION' && activeProformas.length > 0;
-  const canSelect = isCompras && (request.status === 'COTIZADA' || request.status === 'EN_EVALUACION');
-  const canGenerateOrder = isCompras && request.status === 'APROBADA_PARA_COMPRA';
-  const canFinalize = (isCompras || actingRole === 'ADMINISTRADOR') && request.status === 'ORDEN_GENERADA';
+  const canAddProforma =
+    can(actingRole, 'proforma.manage') && (request.status === 'EN_COTIZACION' || request.status === 'COTIZADA');
+  const canStartQuotation = can(actingRole, 'purchaseRequest.startQuotation') && request.status === 'APROBADA';
+  const canMarkAsQuoted =
+    can(actingRole, 'purchaseRequest.markQuoted') &&
+    request.status === 'EN_COTIZACION' &&
+    activeProformas.length > 0;
+  const canSelect =
+    can(actingRole, 'purchaseRequest.selectProforma') &&
+    (request.status === 'COTIZADA' || request.status === 'EN_EVALUACION');
+  const canGenerateOrder =
+    can(actingRole, 'purchaseRequest.generateOrder') && request.status === 'APROBADA_PARA_COMPRA';
+  const canFinalize = can(actingRole, 'purchaseRequest.finalize') && request.status === 'ORDEN_GENERADA';
+  const canVoidProforma = can(actingRole, 'proforma.manage');
 
   // Unión de productos cotizados en cualquier proforma, para la tabla comparativa.
   const comparisonProducts = useMemo(() => {
@@ -383,7 +398,7 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
         </div>
 
         {loading ? (
-          <div className="p-6 text-center text-slate-400 text-sm">Cargando proformas...</div>
+          <LoadingState message="Cargando proformas..." className="text-sm" />
         ) : proformas.length === 0 && !showForm ? (
           <p className="text-sm text-slate-400">Aún no se registraron proformas para esta solicitud.</p>
         ) : (
@@ -406,7 +421,7 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
                       <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
                         <Award size={11} /> SELECCIONADA
                       </span>
-                    ) : isCompras && (request.status === 'EN_COTIZACION' || request.status === 'COTIZADA') ? (
+                    ) : canVoidProforma && (request.status === 'EN_COTIZACION' || request.status === 'COTIZADA') ? (
                       <button
                         onClick={() => { setVoidingProforma(p); setVoidReason(''); setError(null); }}
                         disabled={busy}

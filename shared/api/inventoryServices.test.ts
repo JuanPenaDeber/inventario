@@ -231,3 +231,138 @@ describe('caché compartida entre lecturas', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThan(antes + 1);
   });
 });
+
+describe('escrituras parciales (PartialWriteError)', () => {
+  // Hallazgo original: crear un préstamo o una asignación son 2+ escrituras
+  // sin transacción (cabecera, luego vínculo con los equipos). Si la segunda
+  // falla, la cabecera YA existe en EspoCRM, pero el equipo queda con su
+  // status anterior — es decir, sigue figurando disponible aunque el
+  // préstamo/asignación ya lo tenga. El mensaje que llegaba a la pantalla era
+  // "no se pudo guardar", que es falso: sí se guardó, a medias. Estos tests
+  // fijan que ahora se avisa exactamente qué quedó desincronizado.
+
+  it('createLoan: si falla vincular los equipos, avisa qué préstamo quedó a medias', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok({ id: 'loan-1', name: 'Préstamo cámaras' })) // cabecera
+      .mockResolvedValueOnce(fail(500)); // vínculo con los equipos
+
+    const { createLoan } = await import('@/shared/api/loanService');
+    const { PartialWriteError } = await import('@/shared/api/inventoryClient');
+
+    const error = await createLoan({
+      name: 'Préstamo cámaras',
+      itemIds: ['item-1'],
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PartialWriteError);
+    // El mensaje tiene que nombrar el préstamo Y advertir del riesgo real:
+    // que el equipo puede figurar disponible sin estarlo. Un mensaje genérico
+    // no le dice a nadie qué ir a revisar.
+    expect(error.message).toContain('Préstamo cámaras');
+    expect(error.message).toContain('loan-1');
+    expect(error.message).toMatch(/disponible/i);
+  });
+
+  it('createLoan: si todo sale bien, no lanza PartialWriteError', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok({ id: 'loan-1', name: 'Préstamo cámaras' })) // cabecera
+      .mockResolvedValueOnce(ok({})) // vínculo con los equipos
+      .mockResolvedValue(ok({ list: [], total: 0 })); // getInventory() al actualizar status
+
+    const { createLoan } = await import('@/shared/api/loanService');
+
+    await expect(
+      createLoan({ name: 'Préstamo cámaras', itemIds: ['item-1'] }),
+    ).resolves.toMatchObject({ id: 'loan-1' });
+  });
+
+  it('createAssignmentWithItems: si falla vincular los equipos, avisa qué asignación quedó a medias', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok({ id: 'asg-1', name: 'Entrega a Ana' })) // cabecera
+      .mockResolvedValueOnce(fail(500)); // vínculo con los equipos
+
+    const { createAssignmentWithItems } = await import('@/shared/api/assignmentService');
+    const { PartialWriteError } = await import('@/shared/api/inventoryClient');
+
+    const error = await createAssignmentWithItems({
+      name: 'Entrega a Ana',
+      itemIds: ['item-1'],
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PartialWriteError);
+    expect(error.message).toContain('Entrega a Ana');
+    expect(error.message).toContain('asg-1');
+  });
+
+  it('createAssignmentWithItems: sin equipos no intenta vincular nada', async () => {
+    // itemIds vacío es un caso real (acta sin equipos todavía): no debe
+    // intentar la segunda escritura ni fallar por eso.
+    fetchMock.mockResolvedValueOnce(ok({ id: 'asg-1', name: 'Entrega a Ana' }));
+
+    const { createAssignmentWithItems } = await import('@/shared/api/assignmentService');
+
+    await expect(
+      createAssignmentWithItems({ name: 'Entrega a Ana', itemIds: [] }),
+    ).resolves.toMatchObject({ id: 'asg-1' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('getInventoryErrorMessage muestra el mensaje completo de un PartialWriteError', async () => {
+    // Es el punto que hacía inútil el mensaje antes de este arreglo: el
+    // contrato de errores solo dejaba pasar InventoryApiError/AbortError, y
+    // cualquier Error simple —como el que lanzaba este caso— se reemplazaba
+    // por el `fallback` genérico del llamador, perdiendo el detalle.
+    const { getInventoryErrorMessage, PartialWriteError } = await import(
+      '@/shared/api/inventoryClient'
+    );
+
+    const error = new PartialWriteError('El préstamo "X" se registró, pero el equipo quedó suelto.');
+
+    expect(getInventoryErrorMessage(error, 'No se pudo guardar el préstamo.')).toBe(
+      'El préstamo "X" se registró, pero el equipo quedó suelto.',
+    );
+  });
+
+  it('un TypeError de red sigue devolviendo el fallback del llamador, no un PartialWriteError', async () => {
+    // Confirma que el branch nuevo no se comió el comportamiento anterior:
+    // un fallo de red suelto (no una escritura a medias) sigue usando el
+    // mensaje que decide cada llamador.
+    const { getInventoryErrorMessage } = await import('@/shared/api/inventoryClient');
+
+    expect(
+      getInventoryErrorMessage(new TypeError('Failed to fetch'), 'No se pudo guardar.'),
+    ).toBe('No se pudo guardar.');
+  });
+});
+
+describe('paginación: aviso al llegar al límite de páginas (fetchAllPages)', () => {
+  // Mismo hallazgo que en espoClient.test.ts, del otro cliente HTTP: el
+  // arreglo de "se mostraban 200 de 429 equipos sin avisar" puso un tope de
+  // seguridad (MAX_PAGES), y ese tope se agotaba en silencio si alguna vez
+  // hacía falta — exactamente el mismo corte, 1000 veces más arriba.
+
+  it('avisa por consola si se agotan las páginas sin terminar la lista', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { PAGE_SIZE, fetchAllPages } = await import('@/shared/api/inventoryClient');
+    // Siempre una página llena, nunca `total`: el loop nunca encuentra una
+    // razón legítima para parar antes de MAX_PAGES.
+    fetchMock.mockResolvedValue(
+      ok({ list: Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `id-${i}` })) }),
+    );
+
+    const result = await fetchAllPages('http://x/CEquipo');
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('límite de'));
+    expect(result?.length).toBeGreaterThan(0);
+  });
+
+  it('no avisa nada cuando la lista termina de forma normal', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { fetchAllPages } = await import('@/shared/api/inventoryClient');
+    fetchMock.mockResolvedValue(ok({ list: [{ id: 'a' }, { id: 'b' }], total: 2 }));
+
+    await fetchAllPages('http://x/CEquipo');
+
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+});

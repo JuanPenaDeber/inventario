@@ -57,7 +57,7 @@ const LoanManager: React.FC = () => {
             >
               <ArrowLeft size={18} /> Cancelar
             </button>
-          ) : (
+          ) : m.canCreateLoan ? (
             <button
               onClick={() => {
                 m.resetForm();
@@ -67,7 +67,7 @@ const LoanManager: React.FC = () => {
             >
               <Plus size={18} /> Nuevo Préstamo
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -83,6 +83,7 @@ const LoanManager: React.FC = () => {
           solicitanteId={m.solicitanteId}
           onSolicitanteChange={m.handleEmployeeChange}
           onAddQuickEmployee={m.handleAddQuickEmployee}
+          canAddEmployee={m.canAddEmployee}
           borrowerContact={m.borrowerContact}
           responsableId={m.responsableId}
           onResponsableChange={m.handleResponsibleChange}
@@ -186,7 +187,9 @@ const LoanManager: React.FC = () => {
                 onToggleReturn={m.toggleReturnSelection}
                 onPartialReturn={m.handlePartialReturn}
                 saving={m.saving}
+                canReturn={m.canReturnLoan}
                 onEdit={m.handleEditStart}
+                canEdit={m.canEditLoan}
                 onPrint={m.handlePrintLoan}
               />
             )}

@@ -10,6 +10,9 @@ import {
   getInventoryErrorMessage,
 } from '@/shared/api/inventoryService';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
+import ErrorBoundary from '@/shared/components/ErrorBoundary';
+import CurrentUserBar from '@/shared/components/CurrentUserBar';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 // Cada módulo carga su propio JS solo cuando se visita, en vez de que todos
 // (Compras incluido, que es el más pesado) vayan en el bundle inicial de
@@ -71,6 +74,15 @@ function getViewFromHash(): ViewState {
 }
 
 const App: React.FC = () => {
+  const { can, loadingEmployees, currentEmployeeId } = useCurrentUser();
+  // Mientras se resuelve "quién soy" (getEmployees() todavía no respondió)
+  // el rol cae a CONSULTA por defecto, aunque sessionStorage ya tenga a
+  // alguien con más privilegio elegido — sin esto, un Administrador que
+  // recarga la página ve por un instante los botones con gate de rol
+  // (Eliminar, Nuevo Empleado) desaparecidos y reaparecer solos apenas
+  // termina de cargar. Si no hay nadie elegido no hay nada que esperar: el
+  // rol CONSULTA ya es el correcto desde el primer render.
+  const resolvingIdentity = loadingEmployees && currentEmployeeId !== '';
   const [view, setView] = useState<ViewState>(() => getViewFromHash());
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
@@ -134,6 +146,13 @@ const App: React.FC = () => {
   }, [view]);
 
   const handleSaveItem = async (itemData: InventoryItemInput) => {
+    // Antes cualquiera podía crear o editar un equipo — no había ningún
+    // control. Segunda línea de defensa: Dashboard ya esconde los botones,
+    // esto cubre el caso de que se llegue acá de otra forma.
+    if (!can(itemData.id ? 'inventory.edit' : 'inventory.create')) {
+      setError('No tenés permiso para esta acción. Requiere el rol Sistemas o Administrador.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -156,6 +175,14 @@ const App: React.FC = () => {
   };
 
   const handleDeleteItem = (id: string) => {
+    // Antes cualquiera podía borrar cualquier equipo — no había ningún
+    // control (ver la revisión de arquitectura, hallazgo de permisos).
+    // Mostrar el diálogo de confirmación para algo que no se va a poder
+    // hacer sería peor que no mostrar nada: parece que casi funcionó.
+    if (!can('inventory.delete')) {
+      setError('No tenés permiso para eliminar equipos. Esta acción requiere el rol Administrador.');
+      return;
+    }
     const item = items.find((i) => i.id === id);
     setConfirmState({
       message: `¿Eliminar "${item?.name ?? 'este equipo'}"? Esta acción no se puede deshacer.`,
@@ -325,6 +352,7 @@ const App: React.FC = () => {
             depende de `items`) — cada otro módulo maneja su propia carga
             internamente, igual que ya hacían Préstamos/Asignaciones/etc. */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:max-w-none">
+          <CurrentUserBar />
           {error && (
             <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 print:hidden">
               <span>{error}</span>
@@ -333,65 +361,99 @@ const App: React.FC = () => {
               </button>
             </div>
           )}
+          {/*
+            Cada módulo tiene su propio ErrorBoundary (`compact`, ver el
+            componente): un error de render en uno no debe apagar los otros
+            siete. Antes solo existía el boundary raíz de index.tsx, que cubre
+            la pantalla entera — un fallo en cualquier módulo dejaba a Ana en
+            Inventario sin acceso a nada, aunque el problema no tuviera nada
+            que ver con Inventario.
+          */}
           <Suspense fallback={<PageSpinner />}>
+            {resolvingIdentity ? (
+              <PageSpinner />
+            ) : (
+            <>
             {view === ViewState.DASHBOARD && (
                 loading ? (
                     <PageSpinner />
                 ) : (
-                    <Dashboard
-                    items={items}
-                    onAddItem={() => { setEditingItem(undefined); setView(ViewState.ADD_ITEM); }}
-                    onEditItem={handleEditItem}
-                    onDeleteItem={handleDeleteItem}
-                    />
+                    <ErrorBoundary compact>
+                        <Dashboard
+                        items={items}
+                        onAddItem={() => { setEditingItem(undefined); setView(ViewState.ADD_ITEM); }}
+                        onEditItem={handleEditItem}
+                        onDeleteItem={handleDeleteItem}
+                        />
+                    </ErrorBoundary>
                 )
             )}
 
             {(view === ViewState.ADD_ITEM || view === ViewState.EDIT_ITEM) && (
-                <InventoryForm
-                initialData={editingItem}
-                onSave={handleSaveItem}
-                onCancel={() => { setEditingItem(undefined); setView(ViewState.DASHBOARD); }}
-                />
+                <ErrorBoundary compact>
+                    <InventoryForm
+                    initialData={editingItem}
+                    onSave={handleSaveItem}
+                    onCancel={() => { setEditingItem(undefined); setView(ViewState.DASHBOARD); }}
+                    />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.PROVIDERS && (
-                <ProviderManager />
+                <ErrorBoundary compact>
+                    <ProviderManager />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.LOANS && (
-                <LoanManager />
+                <ErrorBoundary compact>
+                    <LoanManager />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.ASSIGNMENTS && (
-                <AssignmentManager />
+                <ErrorBoundary compact>
+                    <AssignmentManager />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.INCIDENTS && (
-                <IncidentsModule />
+                <ErrorBoundary compact>
+                    <IncidentsModule />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.PURCHASE_ORDERS && (
-                <PurchaseOrderManager
-                    initialSearch={purchaseNav.orderReference}
-                    onConsumeInitialSearch={() => setPurchaseNav({})}
-                />
+                <ErrorBoundary compact>
+                    <PurchaseOrderManager
+                        initialSearch={purchaseNav.orderReference}
+                        onConsumeInitialSearch={() => setPurchaseNav({})}
+                    />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.PURCHASE_REQUESTS && (
-                <PurchaseRequestManager
-                    initialRequestId={purchaseNav.requestId}
-                    onConsumeInitialRequest={() => setPurchaseNav({})}
-                    onNavigateToOrder={goToPurchaseOrder}
-                />
+                <ErrorBoundary compact>
+                    <PurchaseRequestManager
+                        initialRequestId={purchaseNav.requestId}
+                        onConsumeInitialRequest={() => setPurchaseNav({})}
+                        onNavigateToOrder={goToPurchaseOrder}
+                    />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.PURCHASE_DASHBOARD && (
-                <PurchaseDashboard onNavigateToRequest={goToPurchaseRequest} />
+                <ErrorBoundary compact>
+                    <PurchaseDashboard onNavigateToRequest={goToPurchaseRequest} />
+                </ErrorBoundary>
             )}
 
             {view === ViewState.PRODUCT_SUGGESTIONS && (
-                <SuggestionManager />
+                <ErrorBoundary compact>
+                    <SuggestionManager />
+                </ErrorBoundary>
+            )}
+            </>
             )}
           </Suspense>
         </main>

@@ -5,21 +5,23 @@
 //
 //   · un flujo de 11 estados con transiciones válidas (el servicio las valida);
 //   · un histórico append-only que se recarga junto al detalle;
-//   · el selector "Actuando como", que decide qué botones de decisión se ven.
+//   · quién puede aprobar/rechazar/editar — ver más abajo.
 //
-// Ese último NO es seguridad: es un selector de UI sin autenticación, guardado
-// en sessionStorage. La regla real de permisos vive en el rol del usuario API
-// de EspoCRM (ver ARCHITECTURE.md).
+// "Quién soy" y el rol ya NO se eligen acá: vienen de useCurrentUser()
+// (shared/auth/CurrentUserContext.tsx), que resuelve el rol en vez de
+// dejarlo elegir de un desplegable. `can()` (shared/auth/permissions.ts) es
+// la capa de INTERFAZ, no la protección real — esa sigue viviendo en el rol
+// del usuario API de EspoCRM (ver ARCHITECTURE.md) hasta que haya login.
 // =============================================================================
 
 import { useEffect, useMemo, useState } from 'react';
 import {
   Employee,
-  PurchaseFlowRole,
   PurchaseRequest,
   PurchaseRequestHistoryEntry,
   PurchaseRequestStatus,
 } from '@/types';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 import { getEmployees } from '@/shared/api/inventoryService';
 import {
   approvePurchaseRequest,
@@ -48,33 +50,6 @@ export const IN_PROGRESS_STATUSES: PurchaseRequestStatus[] = [
   'APROBADA_PARA_COMPRA',
   'ORDEN_GENERADA',
 ];
-
-const ACTING_AS_KEY = 'purchaseFlow.actingAs';
-
-interface ActingAs {
-  role: PurchaseFlowRole;
-  employeeId: string;
-}
-
-/**
- * Lee el rol activo de sessionStorage (no localStorage: se olvida al cerrar la
- * pestaña, a propósito, porque no es una sesión real).
- */
-function loadActingAs(): ActingAs {
-  try {
-    const raw = sessionStorage.getItem(ACTING_AS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<ActingAs>;
-      return {
-        role: (parsed.role as PurchaseFlowRole) || 'SOLICITANTE',
-        employeeId: parsed.employeeId || '',
-      };
-    }
-  } catch {
-    // sessionStorage no disponible o JSON corrupto: se arranca por defecto.
-  }
-  return { role: 'SOLICITANTE', employeeId: '' };
-}
 
 interface Options {
   initialRequestId?: string;
@@ -117,27 +92,15 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  const [actingRole, setActingRole] = useState<PurchaseFlowRole>(() => loadActingAs().role);
-  const [actingEmployeeId, setActingEmployeeId] = useState<string>(() => loadActingAs().employeeId);
+  // "Quién soy" es global (barra en App.tsx) — acá sólo se lee. `role` viene
+  // RESUELTO, no elegido: ver la cabecera del archivo.
+  const { role: actingRole, currentEmployeeId: actingEmployeeId, currentEmployee, can } =
+    useCurrentUser();
+  const actingEmployeeName = currentEmployee?.name || '';
+
   const [decisionComment, setDecisionComment] = useState('');
   const [deciding, setDeciding] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
-
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(
-        ACTING_AS_KEY,
-        JSON.stringify({ role: actingRole, employeeId: actingEmployeeId }),
-      );
-    } catch {
-      // Sin persistencia si sessionStorage no está disponible; no es crítico.
-    }
-  }, [actingRole, actingEmployeeId]);
-
-  const actingEmployeeName = useMemo(
-    () => employees.find((e) => e.id === actingEmployeeId)?.name || '',
-    [employees, actingEmployeeId],
-  );
 
   // Consume la solicitud inicial (llegada por navegación cruzada) una sola vez.
   useEffect(() => {
@@ -182,9 +145,21 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
     setHistory(hist);
   };
 
+  // Un SOLICITANTE sólo ve sus propias solicitudes (ver purchaseRequest.view
+  // en permissions.ts) — no tiene sentido que navegue las de otro empleado.
+  // El resto de los roles ve todas. Va ANTES del filtro de búsqueda/estado/
+  // fecha: primero se decide qué es visible, después se lo recorta más.
+  const visibleRequests = useMemo(
+    () =>
+      requests.filter((r) =>
+        can('purchaseRequest.view', { isOwn: r.requesterId === actingEmployeeId }),
+      ),
+    [requests, actingEmployeeId, can],
+  );
+
   const filteredRequests = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return requests
+    return visibleRequests
       .filter((r) => {
         const matchesSearch =
           !q ||
@@ -199,7 +174,7 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
         return matchesSearch && matchesStatus && matchesDate;
       })
       .sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
-  }, [requests, search, statusFilter, startDate, endDate]);
+  }, [visibleRequests, search, statusFilter, startDate, endDate]);
 
   const countsByStatus = useMemo(() => {
     const counts: Record<string, number> = { EN_PROCESO: 0 };
@@ -347,7 +322,7 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
 
   const handleApprove = (request: PurchaseRequest) => {
     if (!actingEmployeeName) {
-      setError('Elige quién está "actuando como" jefe antes de aprobar.');
+      setError('Elegí quién sos en "Quién soy" antes de aprobar.');
       return;
     }
     setConfirmState({
@@ -375,7 +350,7 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
 
   const handleReject = (request: PurchaseRequest) => {
     if (!actingEmployeeName) {
-      setError('Elige quién está "actuando como" jefe antes de rechazar.');
+      setError('Elegí quién sos en "Quién soy" antes de rechazar.');
       return;
     }
     if (!decisionComment.trim()) {
@@ -415,16 +390,35 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
   const isTerminal = (s: PurchaseRequestStatus) =>
     s === 'RECHAZADA' || s === 'FINALIZADA' || s === 'CANCELADA';
 
-  const canEdit = !!selectedRequest && selectedRequest.status === 'BORRADOR';
+  // `isOwnSelectedRequest`: la solicitud abierta es la que creó el "quién
+  // soy" actual. Decide, junto con can(), quién puede tocarla — ver
+  // purchaseRequest.editDraft/submit/cancel en permissions.ts (todos menos
+  // ADMINISTRADOR están limitados a lo propio).
+  const isOwnSelectedRequest =
+    !!selectedRequest && !!actingEmployeeId && selectedRequest.requesterId === actingEmployeeId;
+
+  const canEdit =
+    !!selectedRequest &&
+    selectedRequest.status === 'BORRADOR' &&
+    can('purchaseRequest.editDraft', { isOwn: isOwnSelectedRequest });
   const canSubmit =
-    !!selectedRequest && selectedRequest.status === 'BORRADOR' && selectedRequest.lines.length > 0;
-  const canCancel = !!selectedRequest && !isTerminal(selectedRequest.status);
-  // Aprobar/rechazar requiere estar "actuando como" JEFE (sin seguridad real).
+    !!selectedRequest &&
+    selectedRequest.status === 'BORRADOR' &&
+    selectedRequest.lines.length > 0 &&
+    can('purchaseRequest.submit', { isOwn: isOwnSelectedRequest });
+  const canCancel =
+    !!selectedRequest &&
+    !isTerminal(selectedRequest.status) &&
+    can('purchaseRequest.cancel', { isOwn: isOwnSelectedRequest });
+  // Aprobar/rechazar: JEFE o ADMINISTRADOR, no depende de ser "propia" — un
+  // jefe aprueba las de su gente, no las que él mismo creó.
   const canDecide =
     !!selectedRequest &&
     selectedRequest.status === 'PENDIENTE_APROBACION' &&
-    actingRole === 'JEFE';
-  // Avisa si quien decide no es el jefe que figura en la solicitud.
+    can('purchaseRequest.approve');
+  // Avisa si quien decide no es el jefe que figura en la solicitud. `can()`
+  // ya dejó pasar a cualquier JEFE (no hay forma de saber "el jefe de quién"
+  // sin más datos en EspoCRM) — esto es sólo una advertencia visual encima.
   const supervisorMismatch =
     !!selectedRequest && !!actingEmployeeId && actingEmployeeId !== selectedRequest.supervisorId;
 
@@ -459,9 +453,7 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
     setStartDate,
     setEndDate,
     actingRole,
-    setActingRole,
     actingEmployeeId,
-    setActingEmployeeId,
     actingEmployeeName,
     decisionComment,
     setDecisionComment,

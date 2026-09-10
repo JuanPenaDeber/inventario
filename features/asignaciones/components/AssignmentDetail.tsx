@@ -10,12 +10,15 @@
 import React from 'react';
 import { Building2, Calendar, Edit, Printer } from 'lucide-react';
 import { Assignment, InventoryItem } from '@/types';
+import { LoadingState } from '@/shared/components/ui/States';
 
 interface AssignmentDetailProps {
   assignment: Assignment;
   items: InventoryItem[];
   loadingItems: boolean;
   onEdit: () => void;
+  /** assignment.edit en permissions.ts — SISTEMAS/ADMINISTRADOR. */
+  canEdit: boolean;
   onPrint: () => void;
 }
 
@@ -24,6 +27,7 @@ export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
   items,
   loadingItems,
   onEdit,
+  canEdit,
   onPrint,
 }) => (
   <>
@@ -40,6 +44,7 @@ export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
         </div>
       </div>
       <div className="flex gap-2">
+        {canEdit && (
         <button
           onClick={onEdit}
           className="p-2 border rounded hover:bg-slate-50 text-slate-600"
@@ -47,6 +52,7 @@ export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
         >
           <Edit size={18} />
         </button>
+        )}
         <button
           onClick={onPrint}
           className="p-2 border rounded hover:bg-slate-50 text-slate-600"
@@ -72,7 +78,7 @@ export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
       <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">Equipos en Custodia</h3>
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {loadingItems ? (
-          <div className="p-4 text-center text-slate-400">Cargando equipos...</div>
+          <LoadingState message="Cargando equipos..." />
         ) : (
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">

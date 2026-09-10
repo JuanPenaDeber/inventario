@@ -15,6 +15,16 @@ afterEach(() => {
   cleanup();
 });
 
+// La suite no debe depender de un .env local: shared/api/espoClient.ts pide
+// la api key recién al hacer una petición (no al importar el módulo), pero
+// algún test igual llega a construir esos headers con fetch mockeado, donde
+// el valor real no importa. Sin este stub, esos tests fallarían en cualquier
+// máquina o CI sin .env por una razón que no tiene nada que ver con lo que
+// están probando.
+if (!import.meta.env.VITE_ESPOCRM_API_KEY) {
+  vi.stubEnv('VITE_ESPOCRM_API_KEY', 'test-api-key');
+}
+
 // jsdom no implementa `window.print`; los tres módulos con vista de impresión
 // lo llaman al pulsar "Imprimir" y sin este doble el test revienta con
 // "Not implemented". Se define una vez aquí en vez de en cada archivo.

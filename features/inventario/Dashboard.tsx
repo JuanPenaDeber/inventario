@@ -4,6 +4,7 @@ import { InventoryItem } from '@/types';
 import { getPhotoUrl } from '@/shared/api/photoServer';
 import { usePagination } from '@/shared/hooks/usePagination';
 import TablePagination from '@/shared/components/TablePagination';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 interface DashboardProps {
   items: InventoryItem[];
@@ -13,6 +14,16 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onDeleteItem }) => {
+  const { can } = useCurrentUser();
+  // Antes cualquiera veía "Eliminar" en cada fila. Ocultarlo (no sólo
+  // bloquearlo al hacer clic) evita el peor caso: alguien confirma el
+  // diálogo de borrado y recién ahí se entera de que no tenía permiso.
+  const canDelete = can('inventory.delete');
+  // Antes cualquier rol podía abrir "Agregar equipo" o cualquier fila para
+  // editarla — no había ningún control. inventory.create/inventory.edit en
+  // permissions.ts ya lo limitan a SISTEMAS/ADMINISTRADOR.
+  const canCreate = can('inventory.create');
+  const canEdit = can('inventory.edit');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'precio' | 'category'>('date');
@@ -177,13 +188,15 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
           </div>
 
-          <button 
+          {canCreate && (
+          <button
             onClick={onAddItem}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium shadow-sm shadow-blue-500/30 transition-all active:scale-95"
           >
             <Plus size={20} />
             <span className="hidden sm:inline">Agregar equipo</span>
           </button>
+          )}
         </div>
       </div>
 
@@ -210,10 +223,10 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
                 </tr>
               ) : (
                 visibleItems.map(item => (
-                  <tr 
-                    key={item.id} 
-                    className="hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => onEditItem(item)}
+                  <tr
+                    key={item.id}
+                    className={`transition-colors ${canEdit ? 'hover:bg-slate-50 cursor-pointer' : ''}`}
+                    onClick={canEdit ? () => onEditItem(item) : undefined}
                   >
                     <td className="p-4">
                       <div className="flex items-center gap-3">
@@ -253,12 +266,14 @@ const Dashboard: React.FC<DashboardProps> = ({ items, onAddItem, onEditItem, onD
                       {item.condition}
                     </td>
                     <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
-                      <button 
-                        onClick={() => onDeleteItem(item.id)}
-                        className="text-slate-400 hover:text-red-600 text-sm font-medium transition-colors px-3 py-1 hover:bg-red-50 rounded"
-                      >
-                        Eliminar
-                      </button>
+                      {canDelete && (
+                        <button
+                          onClick={() => onDeleteItem(item.id)}
+                          className="text-slate-400 hover:text-red-600 text-sm font-medium transition-colors px-3 py-1 hover:bg-red-50 rounded"
+                        >
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -6,12 +6,18 @@ import { getProviders, addProvider, deleteProvider, getInventoryErrorMessage } f
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { controlClass } from '@/shared/components/ui/Field';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 // Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
 // purple es el de este módulo.
 const inputCls = controlClass('purple') + ' mt-1';
 
 const ProviderManager: React.FC = () => {
+  const { can } = useCurrentUser();
+  // Antes cualquier rol podía agregar o borrar proveedores — no había ningún
+  // control. provider.manage en permissions.ts ya lo limita a COMPRAS/
+  // ADMINISTRADOR; esto solo hace que la interfaz lo respete.
+  const canManage = can('provider.manage');
   const { data: providers, setData: setProviders, loading, error, setError } = useAsyncData<Provider[]>(
     getProviders,
     [],
@@ -29,7 +35,7 @@ const ProviderManager: React.FC = () => {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProvider.name) return;
+    if (!canManage || !newProvider.name) return;
 
     setSaving(true);
     setError(null);
@@ -45,6 +51,7 @@ const ProviderManager: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
+    if (!canManage) return;
     setConfirmState({
       message: '¿Eliminar proveedor?',
       tone: 'danger',
@@ -86,8 +93,9 @@ const ProviderManager: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className={`grid grid-cols-1 gap-8 ${canManage ? 'lg:grid-cols-3' : ''}`}>
         {/* Add Form */}
+        {canManage && (
         <div className="lg:col-span-1">
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 sticky top-24">
                 <h2 className="text-lg font-semibold text-slate-800 mb-4">Nuevo proveedor</h2>
@@ -135,6 +143,7 @@ const ProviderManager: React.FC = () => {
                 </form>
             </div>
         </div>
+        )}
 
         {/* List */}
         <div className="lg:col-span-2 grid gap-4">
@@ -167,12 +176,15 @@ const ProviderManager: React.FC = () => {
                                 )}
                             </div>
                         </div>
-                        <button 
+                        {canManage && (
+                        <button
                             onClick={() => handleDelete(provider.id)}
+                            title="Eliminar proveedor"
                             className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                         >
                             <Trash2 size={18} />
                         </button>
+                        )}
                     </div>
                 ))
             )}

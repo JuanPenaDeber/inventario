@@ -143,7 +143,14 @@ export const getEmployees = async (): Promise<Employee[]> => cached('employees',
       return list.map((e: any) => ({
           id: e.id,
           name: e.name || e.nombre || 'Unknown',
-          equipo: e.equipo || e.departamento || 'General'
+          equipo: e.equipo || e.departamento || 'General',
+          // Mismo criterio que `equipo`/`departamento` arriba: se prueban los
+          // nombres de campo más probables porque CRegistroEmpleados no tiene
+          // hoy un campo de rol confirmado — si en EspoCRM se llama distinto,
+          // agregar el nombre real acá es todo lo que hace falta. Sin ninguno
+          // de estos, resolveRole() sigue con la tabla local por nombre (ver
+          // shared/auth/roleResolution.ts).
+          rawRole: e.rol || e.role || e.cargo || e.puesto || undefined,
       }));
   }
   return MOCK_EMPLOYEES;

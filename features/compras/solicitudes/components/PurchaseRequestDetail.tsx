@@ -22,13 +22,14 @@ import {
   Clock,
 } from 'lucide-react';
 import {
-  PurchaseFlowRole,
+  Role,
   PurchaseRequest,
   PurchaseRequestHistoryEntry,
   PurchaseRequestStatus,
 } from '@/types';
 import { formatDate, formatDateTime } from '@/shared/utils/reportUtils';
 import StatusChip from '@/shared/components/ui/StatusChip';
+import { LoadingState } from '@/shared/components/ui/States';
 import { controlClass } from '@/shared/components/ui/Field';
 import ProformaPanel from '@/features/compras/proformas/ProformaPanel';
 
@@ -48,7 +49,7 @@ interface PurchaseRequestDetailProps {
   onCancelRequest: (request: PurchaseRequest) => void;
 
   canDecide: boolean;
-  actingRole: PurchaseFlowRole;
+  actingRole: Role;
   actingEmployeeId: string;
   actingEmployeeName: string;
   supervisorMismatch: boolean;
@@ -174,17 +175,17 @@ export const PurchaseRequestDetail: React.FC<PurchaseRequestDetailProps> = ({
 
           {!actingEmployeeId && (
             <p className="mb-3 text-sm text-amber-700 flex items-center gap-2">
-              <AlertTriangle size={14} /> Elige un empleado en "Actuando como" para poder aprobar o
-              rechazar.
+              <AlertTriangle size={14} /> Elegí quién sos en "Quién soy" (arriba de todo) para poder
+              aprobar o rechazar.
             </p>
           )}
           {supervisorMismatch && (
             <p className="mb-3 text-sm text-amber-700 flex items-center gap-2">
               <AlertTriangle size={14} />
               El jefe inmediato registrado es{' '}
-              <strong className="mx-1">{request.supervisorName}</strong>, pero estás actuando como{' '}
-              <strong className="mx-1">{actingEmployeeName}</strong>. Se permite igual (sin
-              seguridad real en esta fase), pero verifica que sea correcto.
+              <strong className="mx-1">{request.supervisorName}</strong>, pero quien decide es{' '}
+              <strong className="mx-1">{actingEmployeeName}</strong>. Se permite igual —cualquier
+              JEFE puede aprobar—, pero verificá que sea correcto.
             </p>
           )}
 
@@ -223,7 +224,7 @@ export const PurchaseRequestDetail: React.FC<PurchaseRequestDetailProps> = ({
         </h3>
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
           {loadingDetail ? (
-            <div className="p-8 text-center text-slate-400">Cargando detalle...</div>
+            <LoadingState message="Cargando detalle..." />
           ) : (
             <table className="w-full text-left text-sm min-w-[640px]">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">

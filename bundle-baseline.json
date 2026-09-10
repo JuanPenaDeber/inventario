@@ -1,21 +1,21 @@
 {
-  "fecha": "2026-09-09T16:24:52.715Z",
+  "fecha": "2026-09-10T06:04:00.760Z",
   "chunks": {
     "arrow-left.js": {
       "bytes": 338,
       "gzip": 268
     },
     "AssignmentManager.js": {
-      "bytes": 20191,
-      "gzip": 5507
+      "bytes": 17648,
+      "gzip": 5740
+    },
+    "assignmentService.js": {
+      "bytes": 1738,
+      "gzip": 924
     },
     "building-2.js": {
       "bytes": 556,
-      "gzip": 342
-    },
-    "chevron-right.js": {
-      "bytes": 557,
-      "gzip": 288
+      "gzip": 341
     },
     "circle-check.js": {
       "bytes": 346,
@@ -26,36 +26,40 @@
       "gzip": 270
     },
     "Dashboard.js": {
-      "bytes": 12409,
-      "gzip": 3202
+      "bytes": 11274,
+      "gzip": 2905
     },
-    "DateRangeBar.js": {
-      "bytes": 3650,
-      "gzip": 1414
-    },
-    "image.js": {
-      "bytes": 442,
-      "gzip": 326
+    "Field.js": {
+      "bytes": 3080,
+      "gzip": 725
     },
     "IncidentsModule.js": {
-      "bytes": 15023,
-      "gzip": 4657
-    },
-    "index.css": {
-      "bytes": 43462,
-      "gzip": 7762
+      "bytes": 14040,
+      "gzip": 4437
     },
     "index.js": {
-      "bytes": 228260,
-      "gzip": 71779
+      "bytes": 233474,
+      "gzip": 73387
+    },
+    "index.css": {
+      "bytes": 47322,
+      "gzip": 8167
     },
     "InventoryForm.js": {
-      "bytes": 19930,
-      "gzip": 5534
+      "bytes": 19870,
+      "gzip": 5547
+    },
+    "ItemPicker.js": {
+      "bytes": 2638,
+      "gzip": 1215
     },
     "LoanManager.js": {
-      "bytes": 26087,
-      "gzip": 7005
+      "bytes": 24820,
+      "gzip": 8059
+    },
+    "MasterDetail.js": {
+      "bytes": 6148,
+      "gzip": 2234
     },
     "package.js": {
       "bytes": 858,
@@ -63,35 +67,35 @@
     },
     "plus.js": {
       "bytes": 326,
-      "gzip": 252
+      "gzip": 253
     },
-    "printer.js": {
-      "bytes": 492,
-      "gzip": 338
+    "PrintDocument.js": {
+      "bytes": 3241,
+      "gzip": 1255
     },
     "ProviderManager.js": {
-      "bytes": 5945,
-      "gzip": 2003
+      "bytes": 5587,
+      "gzip": 1998
     },
     "PurchaseDashboard.js": {
-      "bytes": 6346,
-      "gzip": 2468
+      "bytes": 6341,
+      "gzip": 2465
     },
     "PurchaseOrderManager.js": {
-      "bytes": 29673,
-      "gzip": 7601
+      "bytes": 28950,
+      "gzip": 7951
     },
     "purchaseOrderService.js": {
-      "bytes": 7320,
-      "gzip": 2768
+      "bytes": 7428,
+      "gzip": 2843
     },
     "PurchaseRequestManager.js": {
-      "bytes": 50525,
-      "gzip": 12835
+      "bytes": 50720,
+      "gzip": 13053
     },
     "purchaseRequestService.js": {
-      "bytes": 19703,
-      "gzip": 6187
+      "bytes": 19030,
+      "gzip": 6088
     },
     "reportUtils.js": {
       "bytes": 1183,
@@ -106,28 +110,32 @@
       "gzip": 272
     },
     "StatusChip.js": {
-      "bytes": 1662,
-      "gzip": 784
+      "bytes": 1061,
+      "gzip": 573
     },
     "SuggestionManager.js": {
-      "bytes": 4673,
-      "gzip": 1622
+      "bytes": 4432,
+      "gzip": 1618
     },
     "suggestionService.js": {
-      "bytes": 1260,
-      "gzip": 691
+      "bytes": 1011,
+      "gzip": 581
+    },
+    "TablePagination.js": {
+      "bytes": 2247,
+      "gzip": 1041
     },
     "trash-2.js": {
       "bytes": 501,
-      "gzip": 318
+      "gzip": 319
     },
     "useAsyncData.js": {
       "bytes": 708,
-      "gzip": 403
+      "gzip": 406
     },
     "user.js": {
       "bytes": 364,
-      "gzip": 284
+      "gzip": 283
     },
     "xlsx.js": {
       "bytes": 500059,

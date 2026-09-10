@@ -23,6 +23,7 @@ import {
   Square,
 } from 'lucide-react';
 import { InventoryItem, Loan } from '@/types';
+import { LoadingState } from '@/shared/components/ui/States';
 
 interface LoanDetailProps {
   loan: Loan;
@@ -34,8 +35,12 @@ interface LoanDetailProps {
   onToggleReturn: (itemId: string) => void;
   onPartialReturn: () => void;
   saving: boolean;
+  /** loan.return en permissions.ts — SISTEMAS/ADMINISTRADOR. */
+  canReturn: boolean;
 
   onEdit: () => void;
+  /** loan.edit en permissions.ts — SISTEMAS/ADMINISTRADOR. */
+  canEdit: boolean;
   onPrint: () => void;
 }
 
@@ -48,7 +53,9 @@ export const LoanDetail: React.FC<LoanDetailProps> = ({
   onToggleReturn,
   onPartialReturn,
   saving,
+  canReturn,
   onEdit,
+  canEdit,
   onPrint,
 }) => {
   const devolucionEsperada = loan.fechaEsperadaDevolucion || loan.fechaHoraDevolucion;
@@ -80,6 +87,7 @@ export const LoanDetail: React.FC<LoanDetailProps> = ({
           )}
         </div>
         <div className="flex gap-2">
+          {canEdit && (
           <button
             onClick={onEdit}
             className="p-2 border rounded hover:bg-slate-50 text-slate-600"
@@ -87,6 +95,7 @@ export const LoanDetail: React.FC<LoanDetailProps> = ({
           >
             <Edit size={18} />
           </button>
+          )}
           <button
             onClick={onPrint}
             className="p-2 border rounded hover:bg-slate-50 text-slate-600"
@@ -110,7 +119,7 @@ export const LoanDetail: React.FC<LoanDetailProps> = ({
 
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {loadingItems ? (
-            <div className="p-8 text-center text-slate-400">Cargando equipos...</div>
+            <LoadingState message="Cargando equipos..." />
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
@@ -177,7 +186,7 @@ export const LoanDetail: React.FC<LoanDetailProps> = ({
           )}
         </div>
 
-        {activo && items.length > 0 && (
+        {activo && items.length > 0 && canReturn && (
           <div className="mt-6 flex justify-end">
             <button
               onClick={onPartialReturn}
