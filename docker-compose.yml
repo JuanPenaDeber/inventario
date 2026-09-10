@@ -38,8 +38,12 @@ services:
         VITE_PHOTOS_BASE_URL: ${VITE_PHOTOS_BASE_URL:-http://172.20.16.38}
         VITE_ADMIN_PASSWORD: ${VITE_ADMIN_PASSWORD:-}
     restart: unless-stopped
-    ports:
-      # Host:Contenedor. Si en Dokploy vas a asignar el dominio directo al
-      # puerto interno del contenedor (Domains → Container Port), este mapeo
-      # de host es redundante pero inofensivo — déjalo si no estás seguro.
-      - "80:80"
+    # SIN "ports:" a propósito. Dokploy ya corre su propio proxy (Traefik)
+    # escuchando en los puertos 80/443 del servidor — publicar un puerto acá
+    # intenta tomar ESE puerto del host directamente y puede chocar con algo
+    # que Dokploy ya esté usando. `expose` solo lo hace disponible dentro de
+    # la red interna de Docker, que es por donde el proxy de Dokploy llega al
+    # contenedor. En Dokploy, configura el dominio apuntando al puerto de
+    # contenedor 8020 (sección Domains → Container Port).
+    expose:
+      - "8020"
