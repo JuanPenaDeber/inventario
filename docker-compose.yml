@@ -1,0 +1,45 @@
+# =============================================================================
+# Para desplegar en Dokploy eligiendo el tipo de aplicación "Docker Compose".
+#
+# Mismo punto clave que el Dockerfile: las variables VITE_* se hornean dentro
+# del JS al construir la imagen (`npm run build`), no se leen en tiempo de
+# ejecución. Por eso acá van como `args:` del build, tomados por interpolación
+# de docker compose (${VARIABLE}) desde las variables que configures en
+# Dokploy — Dokploy las escribe a un archivo `.env` junto a este compose antes
+# de correr `docker compose build`, que es de donde docker compose las lee
+# para esta sustitución. Si en cambio las pones en un `environment:` del
+# servicio, solo estarían disponibles DENTRO del contenedor ya corriendo, y la
+# imagen ya se habría construido sin ellas.
+#
+# Variables a configurar en Dokploy (sección Environment/Variables de la app):
+#   VITE_ESPOCRM_API_KEY          obligatoria, sin valor por defecto
+#   VITE_PURCHASE_ORDER_ENTITY    opcional (default: CCOrdenCompra)
+#   VITE_PURCHASE_REQUEST_ENTITY  opcional (default: CCSolicitudCompra)
+#   VITE_PROFORMA_ENTITY          opcional (default: CCProforma)
+#   VITE_SUGGESTION_ENTITY        opcional (default: CCSugerenciaProducto)
+#   VITE_PHOTOS_BASE_URL          opcional (default: http://172.20.16.38)
+#   VITE_ADMIN_PASSWORD           opcional (portal de incidencias, hoy apagado)
+# =============================================================================
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Sin valor por defecto a propósito: si Dokploy no la tiene
+        # configurada, `docker compose build` falla con este mensaje en vez
+        # de construir en silencio una imagen sin API key.
+        VITE_ESPOCRM_API_KEY: ${VITE_ESPOCRM_API_KEY:?Falta configurar VITE_ESPOCRM_API_KEY en las variables de entorno de Dokploy}
+        VITE_PURCHASE_ORDER_ENTITY: ${VITE_PURCHASE_ORDER_ENTITY:-CCOrdenCompra}
+        VITE_PURCHASE_REQUEST_ENTITY: ${VITE_PURCHASE_REQUEST_ENTITY:-CCSolicitudCompra}
+        VITE_PROFORMA_ENTITY: ${VITE_PROFORMA_ENTITY:-CCProforma}
+        VITE_SUGGESTION_ENTITY: ${VITE_SUGGESTION_ENTITY:-CCSugerenciaProducto}
+        VITE_PHOTOS_BASE_URL: ${VITE_PHOTOS_BASE_URL:-http://172.20.16.38}
+        VITE_ADMIN_PASSWORD: ${VITE_ADMIN_PASSWORD:-}
+    restart: unless-stopped
+    ports:
+      # Host:Contenedor. Si en Dokploy vas a asignar el dominio directo al
+      # puerto interno del contenedor (Domains → Container Port), este mapeo
+      # de host es redundante pero inofensivo — déjalo si no estás seguro.
+      - "80:80"
