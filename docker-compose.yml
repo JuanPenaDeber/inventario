@@ -38,12 +38,19 @@ services:
         VITE_PHOTOS_BASE_URL: ${VITE_PHOTOS_BASE_URL:-http://172.20.16.38}
         VITE_ADMIN_PASSWORD: ${VITE_ADMIN_PASSWORD:-}
     restart: unless-stopped
-    # SIN "ports:" a propósito. Dokploy ya corre su propio proxy (Traefik)
-    # escuchando en los puertos 80/443 del servidor — publicar un puerto acá
-    # intenta tomar ESE puerto del host directamente y puede chocar con algo
-    # que Dokploy ya esté usando. `expose` solo lo hace disponible dentro de
-    # la red interna de Docker, que es por donde el proxy de Dokploy llega al
-    # contenedor. En Dokploy, configura el dominio apuntando al puerto de
-    # contenedor 8020 (sección Domains → Container Port).
-    expose:
-      - "8020"
+    # Publica 8020 en el host para poder entrar directo por IP:8020 (lo que
+    # estabas probando). Distinto del problema anterior con el puerto 80: ese
+    # SÍ chocaba porque Traefik ya lo ocupa; el 8020 no lo usa nadie más, así
+    # que publicarlo es seguro.
+    ports:
+      - "8020:8020"
+    # Además se conecta a la red que ya administra Dokploy, para que su
+    # Traefik también pueda llegar al contenedor SI más adelante configuras
+    # un dominio en la pestaña Domains (Container Port: 8020). Las dos formas
+    # de entrar —IP directa y dominio— funcionan a la vez, no son excluyentes.
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
