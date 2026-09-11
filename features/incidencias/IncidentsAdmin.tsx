@@ -25,6 +25,7 @@ import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { today, daysAgo, isWithinDateRange, formatDateTime } from '@/shared/utils/reportUtils';
 import { usePagination } from '@/shared/hooks/usePagination';
 import TablePagination from '@/shared/components/TablePagination';
+import { ErrorBanner } from '@/shared/components/ui/States';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 interface DashboardFilters {
@@ -150,14 +151,7 @@ export default function IncidentsAdmin() {
 
       <StatCards incidents={filtered} />
 
-      {error && (
-        <div className="flex items-start justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       {loading ? (
         <div className="flex justify-center py-16">
@@ -561,11 +555,7 @@ function EditIncidentModal({
             </div>
           </div>
 
-          {error && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+          {error && <ErrorBanner message={error} onDismiss={() => setError(null)} className="mt-4" />}
         </div>
 
         {/* Acciones */}

@@ -192,8 +192,9 @@ export const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
             <PackageCheck size={16} /> Registrar recepción
           </h3>
           <p className="text-xs text-slate-500 mb-3">
-            Indica la cantidad total recibida por producto (permite recepción parcial). Esto no crea
-            equipos en el inventario automáticamente.
+            Indica la cantidad total recibida por producto (permite recepción parcial). Cada unidad
+            nueva que marques aquí crea un equipo en el inventario automáticamente (sin serie ni
+            ubicación real todavía — se completa después a mano).
           </p>
           <div className="space-y-2">
             {order.lines.map((line) => (

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getLoanItems: vi.fn(),
   createLoan: vi.fn(),
   returnLoanItems: vi.fn(),
+  addEmployee: vi.fn(),
 }));
 
 vi.mock('@/shared/api/inventoryService', () => ({
@@ -30,7 +31,7 @@ vi.mock('@/shared/api/inventoryService', () => ({
   createLoan: mocks.createLoan,
   returnLoanItems: mocks.returnLoanItems,
   updateLoan: vi.fn(),
-  addEmployee: vi.fn(),
+  addEmployee: mocks.addEmployee,
   getInventoryErrorMessage: (_e: unknown, fallback: string) => fallback,
 }));
 
@@ -97,6 +98,16 @@ describe('LoanManager', () => {
     expect(screen.getByRole('heading', { name: 'Pañol / Préstamos' })).toBeTruthy();
   });
 
+  it('pide la lista de empleados una sola vez (la comparte con "Quién soy", no la duplica)', async () => {
+    // Regresión real: useLoanManager tenía su propia copia de empleados,
+    // pedida por separado de CurrentUserContext — dos fetches por cada
+    // módulo montado en vez de uno compartido.
+    renderManager();
+    await screen.findByText('Préstamo cámaras evento');
+
+    expect(mocks.getEmployees).toHaveBeenCalledTimes(1);
+  });
+
   it('distingue en la lista un préstamo activo de uno finalizado', async () => {
     renderManager();
     await screen.findByText('Préstamo cámaras evento');
@@ -115,6 +126,44 @@ describe('LoanManager', () => {
     renderManager();
 
     expect(await screen.findByText('VENCIDO')).toBeTruthy();
+  });
+
+  it('marca como VENCIDO un préstamo con el mismo día-del-mes que hoy, en otro mes', async () => {
+    // Regresión real: isOverdue() comparaba solo getDate() (día del mes) para
+    // no marcar como vencido un préstamo que vence HOY — pero eso también
+    // excluía cualquier fecha vencida hace meses que cayera en el mismo
+    // día-del-mes. Un préstamo vencido hace 2 meses nunca se marcaba VENCIDO.
+    const dosMesesAtras = new Date();
+    dosMesesAtras.setMonth(dosMesesAtras.getMonth() - 2);
+    const fechaVencidaMismoDia = dosMesesAtras.toISOString();
+
+    mocks.getLoans.mockResolvedValue([
+      makeLoan({
+        name: 'Préstamo vencido hace meses',
+        status: 'PRESTADO',
+        fechaEsperadaDevolucion: fechaVencidaMismoDia,
+      }),
+    ]);
+
+    renderManager();
+
+    expect(await screen.findByText('VENCIDO')).toBeTruthy();
+  });
+
+  it('no marca como VENCIDO un préstamo que vence hoy', async () => {
+    mocks.getLoans.mockResolvedValue([
+      makeLoan({
+        name: 'Préstamo vence hoy',
+        status: 'PRESTADO',
+        fechaEsperadaDevolucion: new Date().toISOString(),
+      }),
+    ]);
+
+    renderManager();
+
+    await screen.findByText('Préstamo vence hoy');
+    expect(screen.queryByText('VENCIDO')).toBeNull();
+    expect(screen.getByText('ACTIVO')).toBeTruthy();
   });
 
   it('muestra el marcador de "sin selección" antes de elegir un préstamo', async () => {
@@ -230,6 +279,33 @@ describe('LoanManager', () => {
     await user.click(screen.getByRole('button', { name: /Nuevo Préstamo/i }));
 
     expect(await screen.findByTitle('Nuevo Empleado')).toBeTruthy();
+  });
+
+  it('si crear un empleado rápido falla, se avisa el error en vez de fallar en silencio', async () => {
+    // Regresión real: addEmployee() ahora siempre lanza si falla (apiWrite),
+    // pero handleAddQuickEmployee no tenía try/catch — la promesa rechazaba
+    // sin manejar y el usuario no veía ningún aviso.
+    mocks.getEmployees.mockResolvedValue([
+      ana,
+      beto,
+      makeEmployee({ id: 'emp-admin', name: 'Ana Admin', rawRole: 'Administrador' }),
+    ]);
+    sessionStorage.setItem('app.currentEmployeeId', 'emp-admin');
+    mocks.addEmployee.mockRejectedValue(new Error('red caída'));
+    const promptSpy = vi
+      .spyOn(window, 'prompt')
+      .mockReturnValueOnce('Nuevo Empleado X')
+      .mockReturnValueOnce('Redacción');
+
+    const user = userEvent.setup();
+    renderManager();
+    await screen.findByText('Préstamo cámaras evento');
+    await user.click(screen.getByRole('button', { name: /Nuevo Préstamo/i }));
+
+    await user.click(await screen.findByTitle('Nuevo Empleado'));
+
+    expect(await screen.findByText('No se pudo crear el empleado.')).toBeTruthy();
+    promptSpy.mockRestore();
   });
 
   it('un fallo de carga no deja la pantalla colgada en "Cargando datos..."', async () => {

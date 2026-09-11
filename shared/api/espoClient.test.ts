@@ -102,6 +102,49 @@ describe('listado paginado de EspoCRM', () => {
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
+
+  it('con `total` conocido, pide las páginas restantes en paralelo (no una por una)', async () => {
+    // Antes cada página se pedía en serie. Con `total` ya conocido desde la
+    // primera respuesta, el resto se pide de una — esto verifica que de
+    // verdad salgan juntas, no solo que el resultado final sea correcto.
+    let inFlightAtOnce = 0;
+    let maxInFlight = 0;
+    const espoFetch = vi.fn(async (path: string) => {
+      inFlightAtOnce++;
+      maxInFlight = Math.max(maxInFlight, inFlightAtOnce);
+      await new Promise((r) => setTimeout(r, 0));
+      inFlightAtOnce--;
+      const offset = Number(new URL(`http://x${path}`).searchParams.get('offset') ?? 0);
+      const total = ESPO_PAGE_SIZE * 3;
+      const list = Array.from(
+        { length: Math.max(0, Math.min(ESPO_PAGE_SIZE, total - offset)) },
+        (_, i) => ({ id: `id-${offset + i}` }),
+      );
+      return { json: async () => ({ total, list }) } as Response;
+    });
+    const listAll = createEspoList(espoFetch as never);
+
+    const result = await listAll('/CEquipo');
+
+    expect(result).toHaveLength(ESPO_PAGE_SIZE * 3);
+    expect(maxInFlight).toBeGreaterThan(1); // las páginas 2 y 3 salieron en simultáneo
+  });
+
+  it('si una página falla, listAll entero rechaza (contrato "siempre lanza")', async () => {
+    const espoFetch = vi.fn(async (path: string) => {
+      const offset = Number(new URL(`http://x${path}`).searchParams.get('offset') ?? 0);
+      if (offset > 0) throw new EspoApiError(500, 'falla de red en una página posterior');
+      return {
+        json: async () => ({
+          total: ESPO_PAGE_SIZE * 3,
+          list: Array.from({ length: ESPO_PAGE_SIZE }, (_, i) => ({ id: `id-${i}` })),
+        }),
+      } as Response;
+    });
+    const listAll = createEspoList(espoFetch as never);
+
+    await expect(listAll('/CEquipo')).rejects.toThrow('falla de red en una página posterior');
+  });
 });
 
 describe('mensajes de error', () => {

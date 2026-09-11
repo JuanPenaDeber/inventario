@@ -142,31 +142,63 @@ const MAX_PAGES = 50;
 /**
  * Crea la función `listAll` de un servicio a partir de su `espoFetch`.
  * Recorre todas las páginas y devuelve los registros crudos concatenados.
- * Propaga los errores igual que espoFetch (contrato "siempre lanza").
+ * Propaga los errores igual que espoFetch (contrato "siempre lanza") — si
+ * cualquier página falla, `listAll` entero rechaza.
  */
 export function createEspoList(espoFetch: ReturnType<typeof createEspoFetch>) {
+  const fetchPage = async (path: string, params: Record<string, string>, page: number) => {
+    const query = new URLSearchParams({
+      ...params,
+      maxSize: String(ESPO_PAGE_SIZE),
+      offset: String(page * ESPO_PAGE_SIZE),
+    });
+    const res = await espoFetch(`${path}?${query.toString()}`);
+    const data = await res.json();
+    const list: any[] = Array.isArray(data) ? data : (data.list ?? []);
+    const total: number | undefined = Array.isArray(data) ? undefined : data.total;
+    return { list, total };
+  };
+
   return async function listAll(
     path: string,
     params: Record<string, string> = {},
   ): Promise<any[]> {
-    const all: any[] = [];
-    // Ver la nota equivalente en fetchAllPages() (inventoryClient.ts): si
-    // esto sigue en `true` después del for, se acabaron las MAX_PAGES
-    // páginas sin que la lista terminara — hay más registros de los que se
-    // trajeron y esta lectura los está descartando en silencio.
+    const first = await fetchPage(path, params, 0);
+    const all: any[] = [...first.list];
+    if (first.list.length < ESPO_PAGE_SIZE) return all;
+    if (typeof first.total === 'number' && all.length >= first.total) return all;
+
+    // Con `total` conocido desde la primera página, se sabe de antemano
+    // cuántas páginas más hacen falta y se piden todas juntas con
+    // `Promise.all` en vez de una por una — antes, una lista de 1.000
+    // registros (5 páginas) hacía 5 viajes de ida y vuelta seguidos.
+    // `espoFetch` siempre lanza, así que si cualquiera falla, `Promise.all`
+    // rechaza y el error sube tal cual (mismo contrato que antes).
+    if (typeof first.total === 'number') {
+      const neededPages = Math.ceil(first.total / ESPO_PAGE_SIZE);
+      const pagesToFetch = Math.min(neededPages, MAX_PAGES);
+      const rest = await Promise.all(
+        Array.from({ length: pagesToFetch - 1 }, (_, i) => fetchPage(path, params, i + 1)),
+      );
+      for (const { list } of rest) all.push(...list);
+      if (neededPages > MAX_PAGES) {
+        console.error(
+          `Se alcanzó el límite de ${MAX_PAGES} páginas en ${path} sin terminar de traer la lista ` +
+          `completa: hay MÁS de ${all.length} registros y esta lectura los está descartando en ` +
+          `silencio. Subí MAX_PAGES acá, o —mejor, si esto empieza a pasar de verdad— filtrá del lado ` +
+          `del servidor en vez de traer todo.`,
+        );
+      }
+      return all;
+    }
+
+    // `total` desconocido: no se puede saber cuántas páginas más hacen falta
+    // de antemano, así que se sigue una por una — igual que antes.
     let hitPageCeiling = true;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const query = new URLSearchParams({
-        ...params,
-        maxSize: String(ESPO_PAGE_SIZE),
-        offset: String(page * ESPO_PAGE_SIZE),
-      });
-      const res = await espoFetch(`${path}?${query.toString()}`);
-      const data = await res.json();
-      const list: any[] = Array.isArray(data) ? data : (data.list ?? []);
+    for (let page = 1; page < MAX_PAGES; page++) {
+      const { list } = await fetchPage(path, params, page);
       all.push(...list);
       if (list.length < ESPO_PAGE_SIZE) { hitPageCeiling = false; break; }
-      if (typeof data.total === 'number' && all.length >= data.total) { hitPageCeiling = false; break; }
     }
     if (hitPageCeiling) {
       console.error(

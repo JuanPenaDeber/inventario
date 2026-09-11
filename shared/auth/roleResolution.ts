@@ -80,8 +80,12 @@ export function interpretRawRole(raw: string | undefined | null): Role | undefin
 
   // Administrador antes que Jefe/Sistemas/Compras: alguien puede ser
   // "Administrador de Sistemas" de cargo, y ese título es de más alcance que
-  // "Sistemas" solo.
-  if (/\badmin/.test(text)) return 'ADMINISTRADOR';
+  // "Sistemas" solo. Palabra completa a propósito: /\badmin/ (sin \b de
+  // cierre) matcheaba cualquier cargo que EMPEZARA con "admin", incluido
+  // "Administrativo" — un puesto de oficina común, no un Administrador real.
+  // Cubre singular/plural y género (administrador/a/es/as) para no perder
+  // "Administradores de Sistemas" al acotar la palabra.
+  if (/\badministrador(a|es|as)?\b/.test(text)) return 'ADMINISTRADOR';
   // "Jefe" antes que Sistemas/Compras: cubre "Jefe de Sistemas" o "Jefe de
   // Compras" como JEFE, que es el cargo real (aprueba gente), sin importar el
   // departamento que gestione — no como SISTEMAS/COMPRAS (mantienen datos).

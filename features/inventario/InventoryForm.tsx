@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Camera, Building2, UserCheck, Upload, Image as ImageIcon, AlertTriangle, FileText, Check } from 'lucide-react';
-import { InventoryItem, Provider, Employee } from '@/types';
-import { getProviders, getEmployees, createAssignmentWithItems, getInventoryErrorMessage } from '@/shared/api/inventoryService';
+import { InventoryItem, Provider } from '@/types';
+import { getProviders, createAssignmentWithItems, getInventoryErrorMessage } from '@/shared/api/inventoryService';
 import { getPhotoUrl } from '@/shared/api/photoServer';
 import CameraModal from '@/features/inventario/CameraModal';
 import { controlClass } from '@/shared/components/ui/Field';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 interface InventoryFormProps {
   initialData?: InventoryItem;
@@ -17,6 +18,10 @@ interface InventoryFormProps {
 const inputCls = controlClass('indigo');
 
 const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCancel }) => {
+  // "Quién soy" ya trae la lista de empleados una sola vez para toda la app
+  // (shared/auth/CurrentUserContext.tsx) — antes este formulario pedía su
+  // propia copia por separado, redundante con esa.
+  const { employees } = useCurrentUser();
   const [formData, setFormData] = useState({
     name: '',
     category: '',
@@ -35,7 +40,6 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
   
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Assignment Modal State
@@ -44,16 +48,8 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ initialData, onSave, onCa
   const [isSavingAssignment, setIsSavingAssignment] = useState(false);
 
   useEffect(() => {
-    const loadDependencies = async () => {
-        const [pData, eData] = await Promise.all([
-            getProviders(),
-            getEmployees()
-        ]);
-        setProviders(pData);
-        setEmployees(eData);
-    };
-    loadDependencies();
-    
+    getProviders().then(setProviders);
+
     if (initialData) {
       setFormData({
         name: initialData.name,

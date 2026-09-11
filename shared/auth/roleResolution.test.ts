@@ -66,6 +66,25 @@ describe('interpretRawRole', () => {
     // El cargo de más alcance gana: la regla de "admin" se evalúa antes que
     // la de "sistemas" a propósito (ver el comentario en el código).
     expect(interpretRawRole('Administrador de Sistemas')).toBe('ADMINISTRADOR');
+    expect(interpretRawRole('Administradora General')).toBe('ADMINISTRADOR');
+  });
+
+  it('el plural "Administradores de Sistemas" también es ADMINISTRADOR', () => {
+    // Regresión real: al acotar la palabra completa para no matchear
+    // "Administrativo" (ver el test de abajo), el regex se puso tan estricto
+    // que dejó de matchear el plural — un cargo escrito como "Administradores
+    // de Sistemas" caía a SISTEMAS, una degradación silenciosa de privilegio.
+    expect(interpretRawRole('Administradores de Sistemas')).toBe('ADMINISTRADOR');
+    expect(interpretRawRole('Administradoras Generales')).toBe('ADMINISTRADOR');
+  });
+
+  it('un cargo "Administrativo" NO es ADMINISTRADOR', () => {
+    // Regresión real: /\badmin/ sin \b de cierre matcheaba cualquier cargo
+    // que EMPEZARA con "admin" — "Asistente Administrativo" (un puesto de
+    // oficina común) resolvía al rol de mayor privilegio de toda la app.
+    expect(interpretRawRole('Asistente Administrativo')).not.toBe('ADMINISTRADOR');
+    expect(interpretRawRole('Auxiliar Administrativo')).not.toBe('ADMINISTRADOR');
+    expect(interpretRawRole('Analista Administrativo')).not.toBe('ADMINISTRADOR');
   });
 
   it('"Jefe de Compras" es JEFE, no COMPRAS', () => {

@@ -12,12 +12,12 @@
 // =============================================================================
 
 import React from 'react';
-import { FileText, Plus, RefreshCw, X } from 'lucide-react';
+import { FileText, Plus } from 'lucide-react';
 import { PurchaseRequestStatus } from '@/types';
 import { formatDate } from '@/shared/utils/reportUtils';
 import MasterDetail from '@/shared/components/MasterDetail';
 import ConfirmDialog from '@/shared/components/ConfirmDialog';
-import { NoSelection } from '@/shared/components/ui/States';
+import { NoSelection, ErrorBanner } from '@/shared/components/ui/States';
 import StatusChip from '@/shared/components/ui/StatusChip';
 import PurchaseRequestForm from '@/features/compras/solicitudes/PurchaseRequestForm';
 import { usePurchaseRequestManager } from '@/features/compras/solicitudes/usePurchaseRequestManager';
@@ -91,20 +91,12 @@ const PurchaseRequestManager: React.FC<PurchaseRequestManagerProps> = ({
       </div>
 
       {m.error && (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{m.error}</span>
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={m.refresh}
-              className="inline-flex items-center gap-1.5 font-medium hover:text-red-900"
-            >
-              <RefreshCw size={14} /> Reintentar
-            </button>
-            <button onClick={() => m.setError(null)}>
-              <X size={16} />
-            </button>
-          </div>
-        </div>
+        <ErrorBanner
+          message={m.error}
+          onRetry={m.refresh}
+          onDismiss={() => m.setError(null)}
+          className="mb-4"
+        />
       )}
 
       <PurchaseRequestFilters

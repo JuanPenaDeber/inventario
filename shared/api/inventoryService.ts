@@ -64,7 +64,6 @@ export {
 export {
     getAssignments,
     getAssignmentItems,
-    deleteAssignmentItems,
     removeAssignmentItems,
     createAssignmentEquipo,
     createAssignment,

@@ -55,7 +55,7 @@ import { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus } from '@/types';
 import { EspoApiError as ApiError, getEspoErrorMessage, createEspoFetch, createEspoList, round2 } from '@/shared/api/espoClient';
 import { readChildLines, syncChildLines } from '@/shared/api/espoChildLines';
 import { createListCache } from '@/shared/api/cache';
-import { addInventoryItem, invalidateCache as invalidateInventoryCache } from '@/shared/api/inventoryService';
+import { addInventoryItem, invalidateCache as invalidateInventoryCache, PartialWriteError } from '@/shared/api/inventoryService';
 
 // --- CONFIGURACIÓN ----------------------------------------------------------
 
@@ -80,8 +80,12 @@ const LINE_PARENT_FIELD =
   import.meta.env.VITE_PURCHASE_ORDER_LINE_PARENT_FIELD ?? 'cOrdenCompraId';
 
 // % de impuesto por defecto al crear una orden nueva. Editable en el formulario.
+// `||` y no `??`: si la variable existe pero queda vacía (`VITE_..._TAX_RATE=`
+// sin valor, un error plausible al descomentar la plantilla), `??` no cae al
+// default porque '' no es null/undefined, y Number('') es 0 — impuesto 0% en
+// silencio en vez de 13%.
 export const DEFAULT_TAX_RATE_PERCENT = Number(
-  import.meta.env.VITE_PURCHASE_ORDER_TAX_RATE ?? 13,
+  import.meta.env.VITE_PURCHASE_ORDER_TAX_RATE || 13,
 );
 
 // Monedas sugeridas para el desplegable (campo Varchar en EspoCRM: no limita).
@@ -551,6 +555,15 @@ export async function receivePurchaseOrder(
         `La cantidad recibida de "${line.description}" debe estar entre 0 y ${line.quantityRequested}.`,
       );
     }
+    // No hay forma de "des-recibir": bajar la cantidad dejaría los equipos ya
+    // creados en una recepción anterior huérfanos en el Inventario, sin que
+    // EspoCRM ni esta función tengan cómo revertirlos.
+    if (receipt.quantityReceived < line.quantityReceived) {
+      throw new Error(
+        `La cantidad recibida de "${line.description}" no puede ser menor a la ya registrada ` +
+        `(${line.quantityReceived}).`,
+      );
+    }
   }
 
   for (const receipt of receipts) {
@@ -561,29 +574,49 @@ export async function receivePurchaseOrder(
   }
 
   // Cada unidad recién llegada (delta contra lo ya recibido antes de esta
-  // llamada) se da de alta como un equipo en el Inventario.
+  // llamada) se da de alta como un equipo en el Inventario. Las líneas ya
+  // quedaron marcadas como recibidas en EspoCRM (arriba) — si esto falla a
+  // mitad de camino, no hay forma de deshacer eso, así que se avisa
+  // exactamente cuántos equipos quedaron creados y cuántos faltan, en vez de
+  // un error genérico (mismo patrón que createAssignmentWithItems/createLoan;
+  // ver PartialWriteError).
   const receivedToday = new Date().toISOString().slice(0, 10);
-  let createdAnyItem = false;
+  let totalToCreate = 0;
   for (const receipt of receipts) {
     const line = linesById.get(receipt.lineId)!;
-    const newlyReceived = receipt.quantityReceived - line.quantityReceived;
-    for (let i = 0; i < newlyReceived; i++) {
-      await addInventoryItem({
-        name: line.description,
-        category: line.category || 'General',
-        serie: '',
-        status: 'Activo',
-        condition: 'Funcional',
-        location: 'Por ubicar',
-        precio: line.unitPrice,
-        providerId: current.providerId,
-        fechaCompra: receivedToday,
-        description: `Ingresado automáticamente al recibir la orden de compra ${current.reference}.`,
-      });
-      createdAnyItem = true;
-    }
+    totalToCreate += receipt.quantityReceived - line.quantityReceived;
   }
-  if (createdAnyItem) invalidateInventoryCache('inventory');
+  let createdCount = 0;
+  try {
+    for (const receipt of receipts) {
+      const line = linesById.get(receipt.lineId)!;
+      const newlyReceived = receipt.quantityReceived - line.quantityReceived;
+      for (let i = 0; i < newlyReceived; i++) {
+        await addInventoryItem({
+          name: line.description,
+          category: line.category || 'General',
+          serie: '',
+          status: 'Activo',
+          condition: 'Funcional',
+          location: 'Por ubicar',
+          precio: line.unitPrice,
+          providerId: current.providerId,
+          fechaCompra: receivedToday,
+          description: `Ingresado automáticamente al recibir la orden de compra ${current.reference}.`,
+        });
+        createdCount++;
+      }
+    }
+  } catch (err) {
+    throw new PartialWriteError(
+      `La orden ${current.reference} ya quedó marcada como recibida en EspoCRM, pero solo se crearon ` +
+      `${createdCount} de ${totalToCreate} equipos nuevos en el inventario. Verifica manualmente el ` +
+      `inventario antes de reintentar.`,
+      { cause: err },
+    );
+  } finally {
+    if (createdCount > 0) invalidateInventoryCache('inventory');
+  }
 
   const updatedLines = await getPurchaseOrderLines(orderId);
   const fullyReceived =

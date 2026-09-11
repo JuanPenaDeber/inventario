@@ -132,9 +132,10 @@ export const AssignmentForm: React.FC<AssignmentFormProps> = ({
             <label className={labelCls}>Fecha de asignación</label>
             <input
               type="date"
+              required
               value={fecha}
               onChange={(e) => onFechaChange(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg outline-none cursor-not-allowed"
+              className={inputCls}
             />
           </div>
 

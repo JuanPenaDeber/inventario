@@ -11,12 +11,12 @@
 // =============================================================================
 
 import React from 'react';
-import { ShoppingCart, Plus, RefreshCw, X } from 'lucide-react';
+import { ShoppingCart, Plus } from 'lucide-react';
 import { PurchaseOrderStatus } from '@/types';
 import { formatDate } from '@/shared/utils/reportUtils';
 import MasterDetail from '@/shared/components/MasterDetail';
 import ConfirmDialog from '@/shared/components/ConfirmDialog';
-import { NoSelection } from '@/shared/components/ui/States';
+import { NoSelection, ErrorBanner } from '@/shared/components/ui/States';
 import StatusChip from '@/shared/components/ui/StatusChip';
 import PurchaseOrderForm from '@/features/compras/ordenes/PurchaseOrderForm';
 import { usePurchaseOrderManager } from '@/features/compras/ordenes/usePurchaseOrderManager';
@@ -84,20 +84,12 @@ const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({
       </div>
 
       {m.error && (
-        <div className="no-print mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{m.error}</span>
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={m.refresh}
-              className="inline-flex items-center gap-1.5 font-medium hover:text-red-900"
-            >
-              <RefreshCw size={14} /> Reintentar
-            </button>
-            <button onClick={() => m.setError(null)}>
-              <X size={16} />
-            </button>
-          </div>
-        </div>
+        <ErrorBanner
+          message={m.error}
+          onRetry={m.refresh}
+          onDismiss={() => m.setError(null)}
+          className="mb-4"
+        />
       )}
 
       <PurchaseOrderFilters

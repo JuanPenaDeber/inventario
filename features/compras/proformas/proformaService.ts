@@ -86,13 +86,16 @@ const PROFORMA_LINE_ENTITY = import.meta.env.VITE_PROFORMA_LINE_ENTITY ?? 'CProf
 const PROFORMA_LINE_PARENT_FIELD =
   import.meta.env.VITE_PROFORMA_LINE_PARENT_FIELD ?? 'cProforma1Id';
 
+// `||` y no `??`: si la variable existe pero queda vacía (un error plausible
+// al descomentar la plantilla sin poner valor), `??` no cae al default porque
+// '' no es null/undefined, y Number('') es 0 — impuesto 0% en silencio.
 export const DEFAULT_PROFORMA_TAX_RATE_PERCENT = Number(
-  import.meta.env.VITE_PROFORMA_TAX_RATE ?? 13,
+  import.meta.env.VITE_PROFORMA_TAX_RATE || 13,
 );
 
 // Días antes del vencimiento en que una proforma se considera "próxima a vencer".
 export const PROFORMA_EXPIRY_WARNING_DAYS = Number(
-  import.meta.env.VITE_PROFORMA_EXPIRY_WARNING_DAYS ?? 3,
+  import.meta.env.VITE_PROFORMA_EXPIRY_WARNING_DAYS || 3,
 );
 
 const FIELDS = {

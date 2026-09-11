@@ -12,6 +12,7 @@ import {
     apiRequest,
     apiWrite,
     cached,
+    diffIds,
     fetchAllPages,
     mapApiItemToInventory,
     PartialWriteError,
@@ -26,9 +27,12 @@ export const getLoans = async (): Promise<Loan[]> => cached('loans', async () =>
 });
 
 export const getLoanItems = async (loanId: string): Promise<InventoryItem[]> => {
-    // UPDATED: Now uses POST to consult items for a specific loan
+    // Usa POST porque el endpoint "consultar" de EspoCRM lo exige, pero sigue
+    // siendo una LECTURA (no cambia nada) — isRead:true evita que abrir un
+    // préstamo invalide la caché de toda la app (inventario, proveedores,
+    // empleados, asignaciones) sin que nada se haya modificado.
     const payload = { prestamoId: loanId };
-    const data = await apiRequest<any>(ENDPOINTS.LOAN_CONSULT, 'POST', payload);
+    const data = await apiRequest<any>(ENDPOINTS.LOAN_CONSULT, 'POST', payload, true);
 
     // Handle standard wrapper with 'list'
     if (data && Array.isArray(data.list)) {
@@ -140,14 +144,10 @@ export const updateLoan = async (id: string, updates: Partial<Loan> & { itemIds?
         // Fetch current items to determine what to add vs remove
         // We use the ID because getLoanItems returns InventoryItems with proper IDs
         const currentItems = await getLoanItems(id);
-        const currentIds = currentItems.map(i => i.id);
-        const newItemIds = updates.itemIds;
-
-        // Identify removals (Items in current but not in new)
-        const idsToRemove = currentIds.filter(cid => !newItemIds.includes(cid));
-        
-        // Identify additions (Items in new but not in current)
-        const idsToAdd = newItemIds.filter(nid => !currentIds.includes(nid));
+        const { toAdd: idsToAdd, toRemove: idsToRemove } = diffIds(
+            currentItems.map(i => i.id),
+            updates.itemIds,
+        );
 
         // Execute Removals
         if (idsToRemove.length > 0) {

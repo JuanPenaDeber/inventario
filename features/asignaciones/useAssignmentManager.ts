@@ -12,49 +12,53 @@
 // =============================================================================
 
 import { useEffect, useMemo, useState } from 'react';
-import { Assignment, Employee, InventoryItem } from '@/types';
+import { Assignment, InventoryItem } from '@/types';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 import {
   createAssignmentWithItems,
   getAssignmentItems,
   getAssignments,
-  getEmployees,
   getInventory,
   getInventoryErrorMessage,
   PartialWriteError,
+  unassignInventoryItem,
   updateAssignment,
   updateInventoryItem,
 } from '@/shared/api/inventoryService';
-import { downloadXlsx, formatDate, isWithinDateRange, rangeSuffix } from '@/shared/utils/reportUtils';
+import { downloadXlsx, formatDate, isWithinDateRange, rangeSuffix, today } from '@/shared/utils/reportUtils';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { useItemSelection } from '@/shared/hooks/useItemSelection';
 import { matchesItemSearch } from '@/shared/components/ItemPicker';
+import type { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 
 export type AssignmentViewMode = 'dashboard' | 'form';
 
 export function useAssignmentManager() {
-  const { can } = useCurrentUser();
+  // "Quién soy" ya trae y cachea la lista de empleados para toda la app —
+  // este hook usaba tener su propia copia, pedida por separado.
+  const { can, employees } = useCurrentUser();
   // Antes cualquier rol podía crear o editar una asignación — no había
   // ningún control. assignment.create/assignment.edit en permissions.ts ya
   // lo limitan a SISTEMAS/ADMINISTRADOR.
   const canCreateAssignment = can('assignment.create');
   const canEditAssignment = can('assignment.edit');
+  // Antes no había ningún botón que desasigne un equipo (dejarlo "sin dueño"
+  // en Inventario sin borrar el acta ni reasignarlo a otra persona) — la
+  // función de servicio (unassignInventoryItem) y el permiso ya existían,
+  // pero no estaban conectados a ninguna pantalla.
+  const canUnassignItem = can('inventory.unassign');
   const [viewMode, setViewMode] = useState<AssignmentViewMode>('dashboard');
 
   const {
-    data: { assignments, inventory, employees },
+    data: { assignments, inventory },
     loading,
     refresh: refreshData,
-  } = useAsyncData<{ assignments: Assignment[]; inventory: InventoryItem[]; employees: Employee[] }>(
+  } = useAsyncData<{ assignments: Assignment[]; inventory: InventoryItem[] }>(
     async () => {
-      const [aData, iData, eData] = await Promise.all([
-        getAssignments(),
-        getInventory(),
-        getEmployees(),
-      ]);
-      return { assignments: aData, inventory: iData, employees: eData };
+      const [aData, iData] = await Promise.all([getAssignments(), getInventory()]);
+      return { assignments: aData, inventory: iData };
     },
-    { assignments: [], inventory: [], employees: [] },
+    { assignments: [], inventory: [] },
     { errorMessage: 'No se pudieron cargar las asignaciones.' },
   );
 
@@ -67,6 +71,7 @@ export function useAssignmentManager() {
   // Distinto de `loading` (carga de datos): marca un guardado en curso.
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
 
   // --- Formulario ---
   const [isEditing, setIsEditing] = useState(false);
@@ -96,17 +101,30 @@ export function useAssignmentManager() {
 
   // Trae los equipos cada vez que cambia la asignación seleccionada.
   useEffect(() => {
+    let cancelled = false;
     const fetchItems = async () => {
       if (selectedAssignmentId) {
         setLoadingItems(true);
         const items = await getAssignmentItems(selectedAssignmentId);
+        // Sin esto, seleccionar rápido la asignación A y después la B puede
+        // dejar en pantalla los equipos de A si su respuesta llega después
+        // que la de B.
+        if (cancelled) return;
         setCurrentAssignmentItems(items);
         setLoadingItems(false);
       } else {
         setCurrentAssignmentItems([]);
+        // Sin esto, deseleccionar mientras una carga anterior sigue en
+        // vuelo dejaba loadingItems en `true` para siempre: el efecto
+        // anterior se cancela y ya no llega a apagarlo (guardado por
+        // `cancelled`), y esta rama tampoco lo tocaba.
+        setLoadingItems(false);
       }
     };
     fetchItems();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedAssignmentId]);
 
   // Asignaciones ofrece todo el inventario: a diferencia de Préstamos, aquí no
@@ -156,7 +174,10 @@ export function useAssignmentManager() {
     setEmployeeName('');
     setEquipo('');
     setName('');
-    setFecha('');
+    // Por defecto, hoy en hora local — el campo ahora es `required` y
+    // editable de verdad (antes parecía autocompletado por estilo, pero no
+    // lo estaba ni tenía valor por defecto).
+    setFecha(today());
     setAuthorizerId('');
     setAuthorizerName('');
     setDescription('');
@@ -273,7 +294,17 @@ export function useAssignmentManager() {
     setAuthorizerName(selectedAssignment.authorizerName || '');
     setDescription(selectedAssignment.description || '');
     setObservacion(selectedAssignment.observacion || '');
-    setFecha(selectedAssignment.fecha);
+    // <input type="date"> solo acepta YYYY-MM-DD exacto — igual que
+    // useLoanManager.handleEditStart. Si EspoCRM devuelve la fecha con hora
+    // (datetime completo en vez de solo fecha), asignarla tal cual dejaba el
+    // campo vacío en el navegador pese a que el estado de React sí tenía un
+    // valor — y ahora que el campo es `required`, eso bloquea el guardado
+    // sin ningún aviso visible de por qué.
+    setFecha(
+      selectedAssignment.fecha
+        ? new Date(selectedAssignment.fecha).toISOString().slice(0, 10)
+        : '',
+    );
 
     // Reusa los equipos que el detalle ya trajo, en vez de volver a pedirlos.
     replaceSelectedItems(currentAssignmentItems.map((i) => i.id));
@@ -283,6 +314,34 @@ export function useAssignmentManager() {
 
   const handlePrint = () => {
     if (selectedAssignment) setTimeout(() => window.print(), 100);
+  };
+
+  const doUnassignItem = async (item: InventoryItem) => {
+    setConfirmState(null);
+    setSaveError(null);
+    try {
+      await unassignInventoryItem(item.id);
+      // El acta no cambia (sigue existiendo), pero el equipo ya no figura
+      // asignado a este empleado en Inventario — se refleja acá recargando
+      // los equipos del detalle abierto.
+      if (selectedAssignmentId) {
+        const items = await getAssignmentItems(selectedAssignmentId);
+        setCurrentAssignmentItems(items);
+      }
+    } catch (err) {
+      setSaveError(getInventoryErrorMessage(err, 'No se pudo desasignar el equipo.'));
+    }
+  };
+
+  const handleUnassignItem = (item: InventoryItem) => {
+    if (!canUnassignItem) return;
+    setConfirmState({
+      title: 'Desasignar equipo',
+      message: `¿Desasignar "${item.name}"? Queda sin responsable en Inventario, pero el acta de esta asignación no se modifica.`,
+      tone: 'danger',
+      confirmLabel: 'Desasignar',
+      onConfirm: () => doUnassignItem(item),
+    });
   };
 
   /** Exporta a Excel (.xlsx) las asignaciones que se están mostrando. */
@@ -330,6 +389,10 @@ export function useAssignmentManager() {
     availableItems,
     canCreateAssignment,
     canEditAssignment,
+    canUnassignItem,
+    handleUnassignItem,
+    confirmState,
+    setConfirmState,
     // formulario
     isEditing,
     name,

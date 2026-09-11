@@ -16,13 +16,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Employee,
   PurchaseRequest,
   PurchaseRequestHistoryEntry,
   PurchaseRequestStatus,
 } from '@/types';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
-import { getEmployees } from '@/shared/api/inventoryService';
 import {
   approvePurchaseRequest,
   cancelPurchaseRequest,
@@ -60,17 +58,17 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
   const [viewMode, setViewMode] = useState<PurchaseRequestViewMode>('list');
 
   const {
-    data: { requests, employees },
+    data: { requests },
     loading,
     error,
     setError,
     refresh,
-  } = useAsyncData<{ requests: PurchaseRequest[]; employees: Employee[] }>(
+  } = useAsyncData<{ requests: PurchaseRequest[] }>(
     async () => {
-      const [reqData, empData] = await Promise.all([getPurchaseRequests(), getEmployees()]);
-      return { requests: reqData, employees: empData };
+      const reqData = await getPurchaseRequests();
+      return { requests: reqData };
     },
-    { requests: [], employees: [] },
+    { requests: [] },
     {
       errorMessage: 'No se pudieron cargar las solicitudes de compra.',
       getErrorMessage: getPurchaseRequestErrorMessage,
@@ -93,9 +91,15 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
   const [endDate, setEndDate] = useState('');
 
   // "Quién soy" es global (barra en App.tsx) — acá sólo se lee. `role` viene
-  // RESUELTO, no elegido: ver la cabecera del archivo.
-  const { role: actingRole, currentEmployeeId: actingEmployeeId, currentEmployee, can } =
-    useCurrentUser();
+  // RESUELTO, no elegido: ver la cabecera del archivo. `employees` también
+  // sale de acá — este hook tenía su propia copia, pedida por separado.
+  const {
+    role: actingRole,
+    currentEmployeeId: actingEmployeeId,
+    currentEmployee,
+    employees,
+    can,
+  } = useCurrentUser();
   const actingEmployeeName = currentEmployee?.name || '';
 
   const [decisionComment, setDecisionComment] = useState('');
@@ -109,11 +113,17 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     const loadDetail = async () => {
       setDecisionComment('');
       if (!selectedRequestId) {
         setSelectedRequest(null);
         setHistory([]);
+        // Sin esto, deseleccionar mientras una carga anterior sigue en
+        // vuelo dejaba loadingDetail en `true` para siempre: el efecto
+        // anterior se cancela y su `finally` ya no llega a apagarlo
+        // (guardado por `cancelled`), y esta rama tampoco lo tocaba.
+        setLoadingDetail(false);
         return;
       }
       setLoadingDetail(true);
@@ -122,17 +132,25 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
           getPurchaseRequest(selectedRequestId),
           getPurchaseRequestHistory(selectedRequestId),
         ]);
+        // Sin esto, seleccionar rápido la solicitud A y después la B puede
+        // dejar en pantalla el detalle/histórico de A si su respuesta llega
+        // después que la de B.
+        if (cancelled) return;
         setSelectedRequest(detail);
         setHistory(hist);
       } catch (err) {
+        if (cancelled) return;
         setError(
           getPurchaseRequestErrorMessage(err, 'No se pudo cargar el detalle de la solicitud.'),
         );
       } finally {
-        setLoadingDetail(false);
+        if (!cancelled) setLoadingDetail(false);
       }
     };
     loadDetail();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedRequestId, setError]);
 
   /** Vuelve a traer detalle + histórico de una solicitud ya seleccionada. */
@@ -214,10 +232,14 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
     setError(null);
     try {
       let requestId = values.id;
+      // El actor del histórico es quien está eligiendo en "Quién soy", no el
+      // solicitante registrado en la solicitud — antes eran siempre lo mismo
+      // porque solo el propio solicitante podía tocar su solicitud; ahora
+      // ADMINISTRADOR puede editar/enviar/cancelar la de cualquiera
+      // (permissions.ts), así que confundirlos deja el histórico mintiendo
+      // sobre quién hizo la acción.
+      const actorName = actingEmployeeName || 'Solicitante';
       if (values.id) {
-        // El actor conocido en Fase 1 es el propio solicitante de la solicitud
-        // (todavía no hay login/roles reales: ver Fase 2/4).
-        const actorName = editingRequest?.requesterName || 'Solicitante';
         await updatePurchaseRequest(
           values.id,
           {
@@ -232,8 +254,6 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
           actorName,
         );
       } else {
-        const requesterName =
-          employees.find((e) => e.id === values.requesterId)?.name || 'Solicitante';
         const created = await createPurchaseRequest(
           {
             requestDate: values.requestDate,
@@ -244,16 +264,12 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
             reason: values.reason,
             lines: values.lines,
           },
-          requesterName,
+          actorName,
         );
         requestId = created.id;
       }
 
       if (values.submitForApproval && requestId) {
-        const actorName =
-          employees.find((e) => e.id === values.requesterId)?.name ||
-          editingRequest?.requesterName ||
-          'Solicitante';
         await submitPurchaseRequest(requestId, actorName);
       }
 
@@ -271,7 +287,10 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
   const handleSubmitForApproval = async (request: PurchaseRequest) => {
     setError(null);
     try {
-      await submitPurchaseRequest(request.id, request.requesterName);
+      // Mismo fallback genérico que handleSaveRequest, no el nombre del
+      // solicitante: si de verdad no se sabe quién actúa, mejor decirlo que
+      // atribuírselo a una persona que puede no haber sido quien actuó.
+      await submitPurchaseRequest(request.id, actingEmployeeName || 'Solicitante');
       await refresh();
       if (selectedRequestId === request.id) await reloadSelectedDetail(request.id);
     } catch (err) {
@@ -283,7 +302,7 @@ export function usePurchaseRequestManager({ initialRequestId, onConsumeInitialRe
     setConfirmState(null);
     setError(null);
     try {
-      await cancelPurchaseRequest(request.id, request.requesterName);
+      await cancelPurchaseRequest(request.id, actingEmployeeName || 'Solicitante');
       await refresh();
       if (selectedRequestId === request.id) await reloadSelectedDetail(request.id);
     } catch (err) {

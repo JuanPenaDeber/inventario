@@ -163,6 +163,19 @@ export class PartialWriteError extends Error {
     }
 }
 
+/**
+ * Compara la lista de ids actual contra la nueva y devuelve qué agregar y qué
+ * quitar. loanService.ts y assignmentService.ts lo escribían cada uno por su
+ * cuenta, carácter por carácter igual, para decidir qué equipos vincular o
+ * desvincular al editar un préstamo o una asignación.
+ */
+export function diffIds(currentIds: string[], nextIds: string[]): { toAdd: string[]; toRemove: string[] } {
+    return {
+        toAdd: nextIds.filter((id) => !currentIds.includes(id)),
+        toRemove: currentIds.filter((id) => !nextIds.includes(id)),
+    };
+}
+
 /** Mensaje legible para el usuario a partir de un error de escritura. */
 export function getInventoryErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof InventoryApiError) {
@@ -181,8 +194,17 @@ export function getInventoryErrorMessage(error: unknown, fallback: string): stri
     return fallback;
 }
 
-/** Petición base: SIEMPRE lanza si algo falla. */
-async function rawRequest<T>(url: string, method: string, body?: any): Promise<T> {
+/**
+ * Petición base: SIEMPRE lanza si algo falla.
+ *
+ * `isRead`: por defecto se asume que GET es lectura y todo lo demás es
+ * mutación (invalida la caché al terminar). Algunas lecturas usan un método
+ * distinto de GET porque el endpoint de EspoCRM así lo exige (ej. el
+ * "consultar" de préstamos, vía POST) — pasar `isRead: true` ahí evita que
+ * una simple consulta invalide la caché de TODA la app (inventario,
+ * proveedores, empleados, préstamos, asignaciones) sin que nada haya cambiado.
+ */
+async function rawRequest<T>(url: string, method: string, body?: any, isRead = false): Promise<T> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
@@ -197,9 +219,10 @@ async function rawRequest<T>(url: string, method: string, body?: any): Promise<T
             throw new InventoryApiError(`HTTP ${response.status} en ${url}`, response.status);
         }
 
-        // Toda mutación (POST/PUT/DELETE) invalida la caché para que la próxima
-        // lectura traiga datos frescos. Evita mostrar información desactualizada.
-        if (method !== 'GET') invalidateCache();
+        // Toda mutación (POST/PUT/DELETE que no sea una lectura marcada como
+        // tal) invalida la caché para que la próxima lectura traiga datos
+        // frescos. Evita mostrar información desactualizada.
+        if (method !== 'GET' && !isRead) invalidateCache();
 
         if (response.status === 204) return {} as T;
         return (await response.json()) as T;
@@ -212,10 +235,13 @@ async function rawRequest<T>(url: string, method: string, body?: any): Promise<T
  * LECTURA con respaldo: devuelve null si falla, para que quien llame pueda
  * caer a los MOCK_* y no dejar la pantalla vacía. Es una decisión deliberada
  * (ver la nota de arquitectura al inicio del archivo).
+ *
+ * `isRead`: ver rawRequest — pasalo en true si esta lectura en particular usa
+ * POST/PUT por necesidad del endpoint, no porque escriba nada.
  */
-export async function apiRequest<T>(url: string, method: string = 'GET', body?: any): Promise<T | null> {
+export async function apiRequest<T>(url: string, method: string = 'GET', body?: any, isRead = false): Promise<T | null> {
     try {
-        return await rawRequest<T>(url, method, body);
+        return await rawRequest<T>(url, method, body, isRead);
     } catch {
         console.warn(`Fallo leyendo ${url}. Se usa el respaldo local.`);
         return null;
@@ -247,6 +273,17 @@ export const PAGE_SIZE = 200;
 // de descartar el resto en silencio.
 const MAX_PAGES = 50;
 
+const pageUrl = (baseUrl: string, page: number): string => {
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${sep}maxSize=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`;
+};
+
+const pageCeilingWarning = (baseUrl: string, count: number): string =>
+    `Se alcanzó el límite de ${MAX_PAGES} páginas en ${baseUrl} sin terminar de traer la ` +
+    `lista completa: hay MÁS de ${count} registros y esta lectura los está descartando ` +
+    `en silencio. Subí MAX_PAGES acá, o —mejor, si esto empieza a pasar de verdad— filtrá del ` +
+    `lado del servidor en vez de traer todo (ver README.md, "Escalabilidad").`;
+
 /**
  * Trae TODAS las páginas de una lista de EspoCRM.
  *
@@ -255,43 +292,64 @@ const MAX_PAGES = 50;
  * página posterior devuelve lo que alcanzó a traer, avisando por consola —
  * romper aquí dejaría al Dashboard con el spinner colgado, porque App.tsx
  * llama a getInventory() sin try/catch.
+ *
+ * La primera página SIEMPRE se pide sola: hasta que no llega no se sabe si
+ * hace falta pedir más, ni (si EspoCRM devuelve `total`) cuántas. Una vez que
+ * `total` se conoce, el resto de las páginas se piden todas juntas con
+ * `Promise.all` en vez de una por una — antes, una lista de 2.000 registros
+ * (10 páginas) hacía 10 viajes de ida y vuelta seguidos; ahora, 1 + 1 (las 9
+ * restantes en simultáneo). Si `total` no viene en la respuesta, no hay forma
+ * de saber cuántas páginas más hacen falta de antemano, así que se seguen
+ * pidiendo una por una — igual que antes.
  */
 export async function fetchAllPages<T = any>(baseUrl: string): Promise<T[] | null> {
-    const all: T[] = [];
-    // Se pone en `false` en cuanto el loop termina por una razón legítima
-    // (una página corta, o `total` alcanzado, o un fallo de red ya avisado).
-    // Si sigue en `true` después del for, es porque se acabaron las
-    // MAX_PAGES páginas SIN que ninguna de esas razones se diera — es decir,
-    // hay más registros de los que se trajeron y se están descartando sin que
-    // nada lo diga. Es el mismo corte silencioso que motivó paginar en
-    // primer lugar ("se mostraban 200 de 429 equipos sin avisar"), a una
-    // escala 1000 veces mayor.
+    const first = await apiRequest<any>(pageUrl(baseUrl, 0));
+    if (!first || !Array.isArray(first.list)) return null;
+
+    const all: T[] = [...first.list];
+    if (first.list.length < PAGE_SIZE) return all; // única página: nada más que pedir
+    if (typeof first.total === 'number' && all.length >= first.total) return all;
+
+    if (typeof first.total === 'number') {
+        const neededPages = Math.ceil(first.total / PAGE_SIZE);
+        const pagesToFetch = Math.min(neededPages, MAX_PAGES);
+
+        const rest = await Promise.all(
+            Array.from({ length: pagesToFetch - 1 }, (_, i) => apiRequest<any>(pageUrl(baseUrl, i + 1))),
+        );
+        for (let i = 0; i < rest.length; i++) {
+            const data = rest[i];
+            if (!data || !Array.isArray(data.list)) {
+                // Se corta en la primera que falló (en orden de página, no en el
+                // orden en que resolvieron) para no dejar huecos en el medio de
+                // la lista — mismo criterio que la versión secuencial.
+                console.warn(`Paginación interrumpida en ${baseUrl} (página ${i + 1}). Se devuelven ${all.length} registros parciales.`);
+                return all;
+            }
+            all.push(...data.list);
+        }
+        if (neededPages > MAX_PAGES) {
+            console.error(pageCeilingWarning(baseUrl, all.length));
+        }
+        return all;
+    }
+
+    // `total` desconocido: sin eso no se puede pedir el resto en paralelo con
+    // seguridad (no se sabe cuándo parar), así que se sigue una por una.
     let hitPageCeiling = true;
-    for (let page = 0; page < MAX_PAGES; page++) {
-        const sep = baseUrl.includes('?') ? '&' : '?';
-        const url = `${baseUrl}${sep}maxSize=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`;
-        const data = await apiRequest<any>(url);
+    for (let page = 1; page < MAX_PAGES; page++) {
+        const data = await apiRequest<any>(pageUrl(baseUrl, page));
 
         if (!data || !Array.isArray(data.list)) {
-            if (page === 0) return null;
-            // No hace falta poner hitPageCeiling en false: el `return`
-            // siguiente sale de la función antes de que el chequeo de más
-            // abajo se llegue a evaluar.
             console.warn(`Paginación interrumpida en ${baseUrl} (página ${page}). Se devuelven ${all.length} registros parciales.`);
             return all;
         }
 
         all.push(...data.list);
         if (data.list.length < PAGE_SIZE) { hitPageCeiling = false; break; }
-        if (typeof data.total === 'number' && all.length >= data.total) { hitPageCeiling = false; break; }
     }
     if (hitPageCeiling) {
-        console.error(
-            `Se alcanzó el límite de ${MAX_PAGES} páginas en ${baseUrl} sin terminar de traer la ` +
-            `lista completa: hay MÁS de ${all.length} registros y esta lectura los está descartando ` +
-            `en silencio. Subí MAX_PAGES acá, o —mejor, si esto empieza a pasar de verdad— filtrá del ` +
-            `lado del servidor en vez de traer todo (ver README.md, "Escalabilidad").`,
-        );
+        console.error(pageCeilingWarning(baseUrl, all.length));
     }
     return all;
 }

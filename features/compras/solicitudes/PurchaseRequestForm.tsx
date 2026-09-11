@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Save, Send, Lightbulb } from 'lucide-react';
-import { PurchaseRequest, PurchaseRequestLine, Employee, ProductSuggestion } from '@/types';
-import { getEmployees } from '@/shared/api/inventoryService';
+import { PurchaseRequest, PurchaseRequestLine, ProductSuggestion } from '@/types';
 import { PRIORITIES } from '@/features/compras/solicitudes/purchaseRequestService';
 import { getProductSuggestions, matchSuggestions } from '@/features/compras/sugerencias/suggestionService';
 import { controlClass, labelClass } from '@/shared/components/ui/Field';
+import { today } from '@/shared/utils/reportUtils';
+import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 // Forma unificada que recibe el padre (PurchaseRequestManager) para decidir
 // si crea o actualiza. `id` presente => update; ausente => create.
@@ -41,15 +42,16 @@ const emptyLine = (): LineDraft => ({
   priority: undefined,
 });
 
-const today = (): string => new Date().toISOString().slice(0, 10);
-
 // Clases de campo compartidas (shared/components/ui/Field.tsx).
 // El acento cian es el del módulo de Solicitudes de Compra.
 const inputCls = controlClass('cyan');
 const labelCls = labelClass();
 
 const PurchaseRequestForm: React.FC<PurchaseRequestFormProps> = ({ initialData, onSave, onCancel, saving = false }) => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  // "Quién soy" ya trae la lista de empleados una sola vez para toda la app
+  // (shared/auth/CurrentUserContext.tsx) — antes este formulario pedía su
+  // propia copia por separado, redundante con esa.
+  const { employees } = useCurrentUser();
   const [requestDate, setRequestDate] = useState(today());
   const [requesterId, setRequesterId] = useState('');
   const [area, setArea] = useState('');
@@ -62,7 +64,6 @@ const PurchaseRequestForm: React.FC<PurchaseRequestFormProps> = ({ initialData, 
   const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([]);
 
   useEffect(() => {
-    getEmployees().then(setEmployees);
     getProductSuggestions().then(setSuggestions).catch(() => setSuggestions([]));
   }, []);
 

@@ -10,6 +10,7 @@ import {
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { controlClass } from '@/shared/components/ui/Field';
+import { ErrorBanner } from '@/shared/components/ui/States';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 /**
@@ -90,9 +91,7 @@ const SuggestionManager: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      )}
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} className="mb-4" />}
 
       <div className={`grid grid-cols-1 gap-8 ${canManage ? 'lg:grid-cols-3' : ''}`}>
         {canManage && (

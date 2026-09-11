@@ -39,6 +39,23 @@ interface CurrentUserContextValue {
   role: Role;
   /** `can('inventory.delete')` — atado al rol actual, sin tener que pasarlo cada vez. */
   can: (operation: Operation, opts?: { isOwn?: boolean }) => boolean;
+  /**
+   * Vuelve a pedir la lista de empleados. `employees` se trae una sola vez al
+   * montar la app — un empleado creado durante la sesión (ej. "Nuevo Empleado"
+   * en Préstamos) no aparecía acá para elegirlo como "quién soy" hasta
+   * recargar la página, aunque la caché de shared/api/cache.ts ya estuviera al
+   * día. `CurrentUserBar` la llama al abrir el desplegable — barato: si nada
+   * cambió, getEmployees() sirve desde la misma caché de 60s.
+   */
+  refreshEmployees: () => void;
+  /**
+   * Agrega un empleado recién creado a la lista, sin esperar un refetch.
+   * Los módulos que crean un empleado "rápido" (ej. Préstamos, "Nuevo
+   * Empleado") ya tienen el registro completo que devolvió EspoCRM — no hace
+   * falta pedirlo de nuevo para que aparezca, ni en su propio desplegable ni
+   * en el resto de la app que ahora comparte esta misma lista.
+   */
+  addEmployeeToList: (employee: Employee) => void;
 }
 
 const CurrentUserContext = createContext<CurrentUserContextValue | null>(null);
@@ -54,9 +71,11 @@ export const CurrentUserProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   });
 
-  // Un solo fetch para toda la app: getEmployees() ya cachea (shared/api/
-  // cache.ts), así que esto no agrega una petición nueva si algún módulo ya
-  // la disparó — comparte la misma caché de 60s.
+  // Un solo fetch AL MONTAR: getEmployees() ya cachea (shared/api/cache.ts),
+  // así que esto no agrega una petición nueva si algún módulo ya la disparó —
+  // comparte la misma caché de 60s. `refreshEmployees` (expuesta abajo) cubre
+  // el resto de la sesión, para no quedar con una lista congelada en lo que
+  // había al abrir la app.
   useEffect(() => {
     let cancelled = false;
     getEmployees()
@@ -70,6 +89,14 @@ export const CurrentUserProvider: React.FC<{ children: React.ReactNode }> = ({ c
       cancelled = true;
     };
   }, []);
+
+  const refreshEmployees = () => {
+    getEmployees().then((list) => setEmployees(list));
+  };
+
+  const addEmployeeToList = (employee: Employee) => {
+    setEmployees((prev) => [...prev, employee]);
+  };
 
   const setCurrentEmployeeId = (id: string) => {
     setCurrentEmployeeIdState(id);
@@ -102,6 +129,8 @@ export const CurrentUserProvider: React.FC<{ children: React.ReactNode }> = ({ c
       currentEmployee,
       role,
       can: (operation, opts) => checkPermission(role, operation, opts),
+      refreshEmployees,
+      addEmployeeToList,
     }),
     [employees, loadingEmployees, currentEmployeeId, currentEmployee, role],
   );

@@ -8,7 +8,7 @@
 // =============================================================================
 
 import React from 'react';
-import { Building2, Calendar, Edit, Printer } from 'lucide-react';
+import { Building2, Calendar, Edit, Printer, UserX } from 'lucide-react';
 import { Assignment, InventoryItem } from '@/types';
 import { LoadingState } from '@/shared/components/ui/States';
 
@@ -20,6 +20,9 @@ interface AssignmentDetailProps {
   /** assignment.edit en permissions.ts — SISTEMAS/ADMINISTRADOR. */
   canEdit: boolean;
   onPrint: () => void;
+  onUnassignItem: (item: InventoryItem) => void;
+  /** inventory.unassign en permissions.ts — SISTEMAS/ADMINISTRADOR. */
+  canUnassign: boolean;
 }
 
 export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
@@ -29,6 +32,8 @@ export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
   onEdit,
   canEdit,
   onPrint,
+  onUnassignItem,
+  canUnassign,
 }) => (
   <>
     <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start">
@@ -103,15 +108,26 @@ export const AssignmentDetail: React.FC<AssignmentDetailProps> = ({
                     <td className="px-4 py-3">{i.category}</td>
                     <td className="px-4 py-3 font-mono text-slate-500">{i.serie}</td>
                     <td className="px-4 py-3">
-                      {i.assignedEmployeeId === assignment.employeeId ? (
-                        <span className="text-green-600 font-bold text-xs bg-green-50 px-2 py-0.5 rounded">
-                          Vigente
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 text-xs italic">
-                          Reasignado a {i.assignedEmployeeName || 'Nadie'}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {i.assignedEmployeeId === assignment.employeeId ? (
+                          <span className="text-green-600 font-bold text-xs bg-green-50 px-2 py-0.5 rounded">
+                            Vigente
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs italic">
+                            Reasignado a {i.assignedEmployeeName || 'Nadie'}
+                          </span>
+                        )}
+                        {canUnassign && i.assignedEmployeeId && (
+                          <button
+                            onClick={() => onUnassignItem(i)}
+                            title="Desasignar equipo"
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                          >
+                            <UserX size={14} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

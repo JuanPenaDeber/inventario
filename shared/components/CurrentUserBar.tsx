@@ -25,7 +25,7 @@ const ROLE_BADGE_CLASS: Record<string, string> = {
 };
 
 export const CurrentUserBar: React.FC = () => {
-  const { employees, loadingEmployees, currentEmployeeId, setCurrentEmployeeId, role } =
+  const { employees, loadingEmployees, currentEmployeeId, setCurrentEmployeeId, role, refreshEmployees } =
     useCurrentUser();
 
   return (
@@ -35,6 +35,7 @@ export const CurrentUserBar: React.FC = () => {
       <select
         value={currentEmployeeId}
         onChange={(e) => setCurrentEmployeeId(e.target.value)}
+        onFocus={refreshEmployees}
         disabled={loadingEmployees}
         className="px-2 py-1 border border-slate-200 rounded-md bg-slate-50 text-slate-700 disabled:opacity-60"
       >

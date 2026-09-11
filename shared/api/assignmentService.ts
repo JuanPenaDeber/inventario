@@ -12,6 +12,7 @@ import {
     apiRequest,
     apiWrite,
     cached,
+    diffIds,
     fetchAllPages,
     mapApiItemToInventory,
     PartialWriteError,
@@ -40,10 +41,6 @@ export const getAssignmentItems = async (assignmentId: string): Promise<Inventor
         return data.list.map(mapApiItemToInventory);
     }
     return [];
-};
-
-export const deleteAssignmentItems = async (assignmentId: string): Promise<void> => {
-    await apiWrite(`${ENDPOINTS.ASSIGNMENTS}/${assignmentId}/items`, 'DELETE');
 };
 
 export const removeAssignmentItems = async (assignmentId: string, itemIds: string[]) => {
@@ -139,14 +136,10 @@ export const updateAssignment = async (id: string, updates: Partial<Assignment> 
   if (updates.itemIds) {
       // Fetch current items to determine what to add vs remove
       const currentItems = await getAssignmentItems(id);
-      const currentIds = currentItems.map(i => i.id);
-      const newItemIds = updates.itemIds;
-
-      // Identify removals (Items in current but not in new)
-      const idsToRemove = currentIds.filter(cid => !newItemIds.includes(cid));
-      
-      // Identify additions (Items in new but not in current)
-      const idsToAdd = newItemIds.filter(nid => !currentIds.includes(nid));
+      const { toAdd: idsToAdd, toRemove: idsToRemove } = diffIds(
+          currentItems.map(i => i.id),
+          updates.itemIds,
+      );
 
       // Execute Removals
       if (idsToRemove.length > 0) {

@@ -62,6 +62,37 @@ describe('useCurrentUser', () => {
     expect(mocks.getEmployees).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshEmployees() vuelve a pedir la lista y actualiza employees', async () => {
+    // Regresión real: employees se traía una sola vez al montar y nunca se
+    // volvía a pedir — un empleado creado durante la sesión no aparecía para
+    // elegirlo como "quién soy" hasta recargar la página entera.
+    const { result } = renderHook(() => useCurrentUser(), { wrapper });
+    await waitFor(() => expect(result.current.loadingEmployees).toBe(false));
+
+    const carla = makeEmployee({ id: 'emp-carla', name: 'Carla Nueva' });
+    mocks.getEmployees.mockResolvedValue([ana, beto, carla]);
+
+    act(() => result.current.refreshEmployees());
+
+    await waitFor(() => expect(result.current.employees).toHaveLength(3));
+    expect(result.current.employees.map((e) => e.name)).toContain('Carla Nueva');
+  });
+
+  it('addEmployeeToList() agrega sin esperar un refetch (usado por "Nuevo Empleado" rápido)', async () => {
+    // Los módulos que crean un empleado (ej. Préstamos) ya tienen el registro
+    // completo que devolvió EspoCRM — addEmployeeToList lo suma de una, sin
+    // depender de que el próximo getEmployees() ya lo incluya.
+    const { result } = renderHook(() => useCurrentUser(), { wrapper });
+    await waitFor(() => expect(result.current.loadingEmployees).toBe(false));
+
+    const dario = makeEmployee({ id: 'emp-dario', name: 'Darío Nuevo' });
+    act(() => result.current.addEmployeeToList(dario));
+
+    expect(result.current.employees).toHaveLength(3);
+    expect(result.current.employees.map((e) => e.name)).toContain('Darío Nuevo');
+    expect(mocks.getEmployees).toHaveBeenCalledTimes(1); // no hizo falta pedir nada de nuevo
+  });
+
   it('al elegir a alguien, el rol se RESUELVE — no se elige aparte', async () => {
     const { result } = renderHook(() => useCurrentUser(), { wrapper });
     await waitFor(() => expect(result.current.loadingEmployees).toBe(false));

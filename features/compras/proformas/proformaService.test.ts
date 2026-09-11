@@ -1,10 +1,26 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   calculateProformaLineSubtotal,
   calculateProformaTotals,
   calculateExpiryDate,
   getProformaValidity,
 } from '@/features/compras/proformas/proformaService';
+
+/**
+ * N días desde hoy, en fecha LOCAL (no UTC). getProformaValidity compara
+ * contra medianoche local (`today.setHours(0,0,0,0)`); `.toISOString()`
+ * extrae la fecha en UTC, que en cualquier huso horario no-UTC puede caer un
+ * día antes o después según la hora del día en que corra el test — hacía que
+ * este archivo fallara o pasara según la hora local, no según el código.
+ */
+function localDateOffset(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 describe('cálculo de importes de una proforma', () => {
   it('aplica el descuento ANTES del impuesto', () => {
@@ -48,19 +64,42 @@ describe('vencimiento de una proforma', () => {
   });
 
   it('marca como VENCIDA una fecha pasada y VIGENTE una lejana', () => {
-    const ayer = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    const enUnAnio = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
-    expect(getProformaValidity(ayer)).toBe('VENCIDA');
-    expect(getProformaValidity(enUnAnio)).toBe('VIGENTE');
+    expect(getProformaValidity(localDateOffset(-1))).toBe('VENCIDA');
+    expect(getProformaValidity(localDateOffset(365))).toBe('VIGENTE');
   });
 
   it('avisa cuando faltan pocos días (PROXIMA_A_VENCER)', () => {
-    const enDosDias = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
-    expect(getProformaValidity(enDosDias, 3)).toBe('PROXIMA_A_VENCER');
+    expect(getProformaValidity(localDateOffset(2), 3)).toBe('PROXIMA_A_VENCER');
   });
 
   it('el último día de validez todavía cuenta como no vencida', () => {
-    const hoy = new Date().toISOString().slice(0, 10);
-    expect(getProformaValidity(hoy, 3)).toBe('PROXIMA_A_VENCER');
+    expect(getProformaValidity(localDateOffset(0), 3)).toBe('PROXIMA_A_VENCER');
+  });
+});
+
+describe('DEFAULT_PROFORMA_TAX_RATE_PERCENT / PROFORMA_EXPIRY_WARNING_DAYS (variables de entorno)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('cae a los defaults si las variables existen pero quedan vacías', async () => {
+    // Regresión real: `Number(env ?? default)` no cae al default con '' (solo
+    // con null/undefined) — Number('') es 0, impuesto 0% / 0 días en silencio.
+    vi.stubEnv('VITE_PROFORMA_TAX_RATE', '');
+    vi.stubEnv('VITE_PROFORMA_EXPIRY_WARNING_DAYS', '');
+    vi.resetModules();
+    const mod = await import('@/features/compras/proformas/proformaService');
+    expect(mod.DEFAULT_PROFORMA_TAX_RATE_PERCENT).toBe(13);
+    expect(mod.PROFORMA_EXPIRY_WARNING_DAYS).toBe(3);
+  });
+
+  it('usa el valor de las variables de entorno cuando sí están pobladas', async () => {
+    vi.stubEnv('VITE_PROFORMA_TAX_RATE', '8');
+    vi.stubEnv('VITE_PROFORMA_EXPIRY_WARNING_DAYS', '5');
+    vi.resetModules();
+    const mod = await import('@/features/compras/proformas/proformaService');
+    expect(mod.DEFAULT_PROFORMA_TAX_RATE_PERCENT).toBe(8);
+    expect(mod.PROFORMA_EXPIRY_WARNING_DAYS).toBe(5);
   });
 });

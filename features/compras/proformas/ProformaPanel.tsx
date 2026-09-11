@@ -37,7 +37,7 @@ import {
 import { formatDate } from '@/shared/utils/reportUtils';
 import { controlClass, labelClass } from '@/shared/components/ui/Field';
 import StatusChip from '@/shared/components/ui/StatusChip';
-import { LoadingState } from '@/shared/components/ui/States';
+import { LoadingState, ErrorBanner } from '@/shared/components/ui/States';
 import { can } from '@/shared/auth/permissions';
 
 const VALIDITY_CHIP: Record<string, string> = {
@@ -218,7 +218,7 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
 
   const requireActor = (): boolean => {
     if (!actingEmployeeName) {
-      setError('Elige un empleado en "Actuando como" antes de continuar.');
+      setError('Elige un empleado en "Quién soy" antes de continuar.');
       return false;
     }
     return true;
@@ -367,11 +367,7 @@ const ProformaPanel: React.FC<ProformaPanelProps> = ({ request, actingRole, acti
 
   return (
     <div className="space-y-4">
-      {error && (
-        <div className="flex items-start justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">

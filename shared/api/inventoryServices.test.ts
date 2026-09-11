@@ -230,6 +230,25 @@ describe('caché compartida entre lecturas', () => {
 
     expect(fetchMock.mock.calls.length).toBeGreaterThan(antes + 1);
   });
+
+  it('getLoanItems (lectura vía POST) no invalida la caché de otras entidades', async () => {
+    // Regresión real: rawRequest invalidaba TODA la caché en cualquier método
+    // distinto de GET, sin distinguir una escritura real de una lectura que
+    // usa POST porque el endpoint de EspoCRM así lo exige (getLoanItems, vía
+    // "consultar"). Abrir un préstamo en pantalla no debería forzar a
+    // Inventario/Proveedores/Empleados/Asignaciones a repetir su lectura.
+    fetchMock.mockResolvedValue(ok({ list: [], total: 0 }));
+    const { getInventory } = await import('@/shared/api/catalogService');
+    const { getLoanItems } = await import('@/shared/api/loanService');
+
+    await getInventory();
+    const antes = fetchMock.mock.calls.length;
+
+    await getLoanItems('loan-1');
+    await getInventory();
+
+    expect(fetchMock.mock.calls.length).toBe(antes + 1); // solo el POST de getLoanItems, no un refetch de inventario
+  });
 });
 
 describe('escrituras parciales (PartialWriteError)', () => {
@@ -364,5 +383,86 @@ describe('paginación: aviso al llegar al límite de páginas (fetchAllPages)', 
     await fetchAllPages('http://x/CEquipo');
 
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('cuando `total` viene en la primera página, pide el resto en paralelo y las concatena en orden', async () => {
+    // Antes cada página se pedía una a la vez, en serie. Con `total` conocido
+    // desde la primera respuesta, el resto se pide de una — esto verifica
+    // que igual queden en el orden correcto (offset 0, 200, 400) aunque las
+    // peticiones salgan todas juntas.
+    const { PAGE_SIZE, fetchAllPages } = await import('@/shared/api/inventoryClient');
+    const total = PAGE_SIZE * 3; // 3 páginas exactas
+    let inFlightAtOnce = 0;
+    let maxInFlight = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      inFlightAtOnce++;
+      maxInFlight = Math.max(maxInFlight, inFlightAtOnce);
+      // Deja que las otras peticiones paralelas también arranquen antes de
+      // "responder" — si de verdad estuvieran en serie, esto no alcanzaría a
+      // pasar de 1 a la vez.
+      await new Promise((r) => setTimeout(r, 0));
+      inFlightAtOnce--;
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      const page = offset / PAGE_SIZE;
+      return ok({
+        list: Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `p${page}-${i}` })),
+        total,
+      });
+    });
+
+    const result = await fetchAllPages('http://x/CEquipo');
+
+    expect(result).toHaveLength(total);
+    expect(result?.[0]).toEqual({ id: 'p0-0' });
+    expect(result?.[PAGE_SIZE]).toEqual({ id: 'p1-0' }); // arranca la página 1 justo donde termina la 0
+    expect(result?.[PAGE_SIZE * 2]).toEqual({ id: 'p2-0' });
+    expect(maxInFlight).toBeGreaterThan(1); // las páginas 1 y 2 sí se pidieron en simultáneo
+  });
+
+  it('si una página del medio falla, corta ahí y no deja huecos con las que sí llegaron', async () => {
+    const { PAGE_SIZE, fetchAllPages } = await import('@/shared/api/inventoryClient');
+    const total = PAGE_SIZE * 3;
+    fetchMock.mockImplementation(async (url: string) => {
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      const page = offset / PAGE_SIZE;
+      if (page === 1) return fail(500); // la página del medio falla
+      return ok({
+        list: Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `p${page}-${i}` })),
+        total,
+      });
+    });
+
+    const result = await fetchAllPages('http://x/CEquipo');
+
+    // Se corta en la página 1 (la que falló): la 0 queda, la 2 se descarta
+    // aunque haya "llegado bien" — evita un hueco en el medio de la lista.
+    expect(result).toHaveLength(PAGE_SIZE);
+    expect(result?.[0]).toEqual({ id: 'p0-0' });
+  });
+});
+
+describe('diffIds', () => {
+  // loanService.ts y assignmentService.ts lo usan para decidir qué equipos
+  // vincular/desvincular al editar un préstamo o una asignación — antes cada
+  // uno traía su propia copia, carácter por carácter igual.
+  it('identifica altas y bajas entre la lista actual y la nueva', async () => {
+    const { diffIds } = await import('@/shared/api/inventoryClient');
+
+    const { toAdd, toRemove } = diffIds(['a', 'b', 'c'], ['b', 'c', 'd']);
+
+    expect(toAdd).toEqual(['d']);
+    expect(toRemove).toEqual(['a']);
+  });
+
+  it('sin cambios, no hay ni altas ni bajas', async () => {
+    const { diffIds } = await import('@/shared/api/inventoryClient');
+
+    expect(diffIds(['a', 'b'], ['a', 'b'])).toEqual({ toAdd: [], toRemove: [] });
+  });
+
+  it('lista nueva vacía da de baja todo lo actual', async () => {
+    const { diffIds } = await import('@/shared/api/inventoryClient');
+
+    expect(diffIds(['a', 'b'], [])).toEqual({ toAdd: [], toRemove: ['a', 'b'] });
   });
 });

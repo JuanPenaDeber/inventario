@@ -14,6 +14,7 @@ import React from 'react';
 import { UserCheck, ArrowLeft, Plus, FileBadge } from 'lucide-react';
 import DateRangeBar from '@/shared/components/DateRangeBar';
 import MasterDetail from '@/shared/components/MasterDetail';
+import ConfirmDialog from '@/shared/components/ConfirmDialog';
 import { NoSelection, ErrorBanner } from '@/shared/components/ui/States';
 import { useAssignmentManager } from '@/features/asignaciones/useAssignmentManager';
 import AssignmentForm from '@/features/asignaciones/components/AssignmentForm';
@@ -140,6 +141,8 @@ const AssignmentManager: React.FC = () => {
                 onEdit={m.handleEditStart}
                 canEdit={m.canEditAssignment}
                 onPrint={m.handlePrint}
+                onUnassignItem={m.handleUnassignItem}
+                canUnassign={m.canUnassignItem}
               />
             )}
           />
@@ -153,6 +156,8 @@ const AssignmentManager: React.FC = () => {
           className="fixed bottom-6 right-6 z-40 max-w-md shadow-lg"
         />
       )}
+
+      <ConfirmDialog state={m.confirmState} onCancel={() => m.setConfirmState(null)} />
     </div>
   );
 };

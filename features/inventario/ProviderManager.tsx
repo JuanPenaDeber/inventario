@@ -6,6 +6,7 @@ import { getProviders, addProvider, deleteProvider, getInventoryErrorMessage } f
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import { controlClass } from '@/shared/components/ui/Field';
+import { ErrorBanner } from '@/shared/components/ui/States';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 // Clases de campo compartidas (shared/components/ui/Field.tsx). El acento
@@ -86,12 +87,7 @@ const ProviderManager: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} aria-label="Cerrar aviso" className="shrink-0 font-medium">×</button>
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} className="mb-6" />}
 
       <div className={`grid grid-cols-1 gap-8 ${canManage ? 'lg:grid-cols-3' : ''}`}>
         {/* Add Form */}

@@ -108,6 +108,15 @@ describe('PurchaseRequestManager', () => {
     expect(screen.getByRole('heading', { name: 'Solicitudes de Compra' })).toBeTruthy();
   });
 
+  it('pide la lista de empleados una sola vez (la comparte con "Quién soy", no la duplica)', async () => {
+    // Regresión real: usePurchaseRequestManager tenía su propia copia de
+    // empleados, pedida por separado de CurrentUserContext.
+    renderManager();
+    await screen.findByText('SC-2025-001');
+
+    expect(mocks.getEmployees).toHaveBeenCalledTimes(1);
+  });
+
   it('muestra el estado de cada solicitud con los guiones bajos ya traducidos', async () => {
     renderManager();
     await screen.findByText('SC-2025-001');

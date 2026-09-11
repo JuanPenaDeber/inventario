@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   calculateLineSubtotal,
   calculateOrderTotals,
@@ -72,5 +72,28 @@ describe('transiciones de estado de una orden', () => {
   it('una orden cancelada es terminal', () => {
     expect(isValidStatusTransition('CANCELADA', 'BORRADOR')).toBe(false);
     expect(isValidStatusTransition('CANCELADA', 'APROBADA')).toBe(false);
+  });
+});
+
+describe('DEFAULT_TAX_RATE_PERCENT (variable de entorno)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('cae a 13 si VITE_PURCHASE_ORDER_TAX_RATE existe pero queda vacía', async () => {
+    // Regresión real: `Number(env ?? 13)` no cae al default con '' (solo con
+    // null/undefined) — Number('') es 0, impuesto 0% en silencio.
+    vi.stubEnv('VITE_PURCHASE_ORDER_TAX_RATE', '');
+    vi.resetModules();
+    const mod = await import('@/features/compras/ordenes/purchaseOrderService');
+    expect(mod.DEFAULT_TAX_RATE_PERCENT).toBe(13);
+  });
+
+  it('usa el valor de la variable de entorno cuando sí está poblada', async () => {
+    vi.stubEnv('VITE_PURCHASE_ORDER_TAX_RATE', '21');
+    vi.resetModules();
+    const mod = await import('@/features/compras/ordenes/purchaseOrderService');
+    expect(mod.DEFAULT_TAX_RATE_PERCENT).toBe(21);
   });
 });

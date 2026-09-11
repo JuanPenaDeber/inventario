@@ -8,12 +8,11 @@
 // =============================================================================
 
 import { useEffect, useMemo, useState } from 'react';
-import { Employee, InventoryItem, Loan } from '@/types';
+import { InventoryItem, Loan } from '@/types';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 import {
   addEmployee,
   createLoan,
-  getEmployees,
   getInventory,
   getInventoryErrorMessage,
   getLoanItems,
@@ -21,7 +20,7 @@ import {
   returnLoanItems,
   updateLoan,
 } from '@/shared/api/inventoryService';
-import { downloadXlsx, formatDate, isWithinDateRange, rangeSuffix } from '@/shared/utils/reportUtils';
+import { downloadXlsx, formatDate, isWithinDateRange, rangeSuffix, today } from '@/shared/utils/reportUtils';
 import { useAsyncData } from '@/shared/hooks/useAsyncData';
 import { useItemSelection } from '@/shared/hooks/useItemSelection';
 import { matchesItemSearch } from '@/shared/components/ItemPicker';
@@ -30,25 +29,23 @@ import type { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 export type LoanViewMode = 'dashboard' | 'create' | 'edit';
 
 export function useLoanManager() {
-  const { can } = useCurrentUser();
+  // "Quién soy" ya trae y cachea la lista de empleados para toda la app —
+  // este hook usaba tener su propia copia, pedida por separado.
+  const { can, employees, addEmployeeToList } = useCurrentUser();
   const [viewMode, setViewMode] = useState<LoanViewMode>('dashboard');
 
   const {
-    data: { loans, inventory, employees },
-    setData,
+    data: { loans, inventory },
     loading,
     refresh,
-  } = useAsyncData<{ loans: Loan[]; inventory: InventoryItem[]; employees: Employee[] }>(
+  } = useAsyncData<{ loans: Loan[]; inventory: InventoryItem[] }>(
     async () => {
-      const [lData, iData, eData] = await Promise.all([getLoans(), getInventory(), getEmployees()]);
-      return { loans: lData, inventory: iData, employees: eData };
+      const [lData, iData] = await Promise.all([getLoans(), getInventory()]);
+      return { loans: lData, inventory: iData };
     },
-    { loans: [], inventory: [], employees: [] },
+    { loans: [], inventory: [] },
     { errorMessage: 'No se pudieron cargar los préstamos.' },
   );
-
-  const setEmployees = (update: (prev: Employee[]) => Employee[]) =>
-    setData((prev) => ({ ...prev, employees: update(prev.employees) }));
 
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   // Distinto de `loading` (que es la carga de datos): esto marca una
@@ -96,18 +93,31 @@ export function useLoanManager() {
 
   // Trae los equipos cada vez que cambia el préstamo seleccionado.
   useEffect(() => {
+    let cancelled = false;
     const fetchItems = async () => {
       setItemsToReturn(new Set()); // la selección de devolución no se arrastra
       if (selectedLoanId) {
         setLoadingItems(true);
         const items = await getLoanItems(selectedLoanId);
+        // Sin esto, seleccionar rápido el préstamo A y después el B puede
+        // dejar en pantalla los equipos de A si su respuesta llega después
+        // que la de B (la más reciente ya no es la más reciente en llegar).
+        if (cancelled) return;
         setCurrentLoanItems(items);
         setLoadingItems(false);
       } else {
         setCurrentLoanItems([]);
+        // Sin esto, deseleccionar mientras una carga anterior sigue en
+        // vuelo dejaba loadingItems en `true` para siempre: el efecto
+        // anterior se cancela y ya no llega a apagarlo (guardado por
+        // `cancelled`), y esta rama tampoco lo tocaba.
+        setLoadingItems(false);
       }
     };
     fetchItems();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedLoanId]);
 
   const refreshData = async () => {
@@ -143,10 +153,23 @@ export function useLoanManager() {
 
   const getEmployeeName = (id?: string) => employees.find((e) => e.id === id)?.name || id || '';
 
-  /** Vencido = la fecha esperada ya pasó, sin contar el día de hoy. */
+  /**
+   * Vencido = la fecha esperada ya pasó, sin contar el día de hoy.
+   *
+   * Regresión real: la versión anterior comparaba `getDate()` (solo el día
+   * del mes) para excluir "vence hoy" de "vencido" — pero eso también
+   * excluía cualquier fecha que cayera en el mismo día del mes en OTRO mes,
+   * así que un préstamo vencido hace 2 meses (mismo día-del-mes que hoy)
+   * nunca se marcaba VENCIDO. La comparación correcta es por fecha completa
+   * (año/mes/día), sin la hora.
+   */
   const isOverdue = (dateStr: string) => {
     if (!dateStr) return false;
-    return new Date(dateStr) < new Date() && new Date(dateStr).getDate() !== new Date().getDate();
+    const due = new Date(dateStr);
+    const today = new Date();
+    const dueDateOnly = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return dueDateOnly < todayDateOnly;
   };
 
   // --- Formulario ---
@@ -190,10 +213,17 @@ export function useLoanManager() {
     const newName = prompt('Nombre del nuevo empleado:');
     if (newName) {
       const dept = prompt('Departamento:') || 'almacen';
-      const newEmp = await addEmployee(newName, dept);
-      setEmployees((prev) => [...prev, newEmp]);
-      setSolicitanteId(newEmp.id);
-      setBorrowerContact(newEmp.equipo);
+      setSaveError(null);
+      try {
+        // addEmployee siempre lanza si falla (apiWrite) — sin este try/catch
+        // la promesa rechazaba sin manejar: no se avisaba nada al usuario.
+        const newEmp = await addEmployee(newName, dept);
+        addEmployeeToList(newEmp);
+        setSolicitanteId(newEmp.id);
+        setBorrowerContact(newEmp.equipo);
+      } catch (err) {
+        setSaveError(getInventoryErrorMessage(err, 'No se pudo crear el empleado.'));
+      }
     }
   };
 
@@ -205,10 +235,7 @@ export function useLoanManager() {
     setBorrowerContact('');
     setFechaEsperadaDevolucion('');
     setFechaHoraDevolucion('');
-    // Por defecto, hoy en hora local (no UTC, o el día salta según la zona).
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    setfechaPrestamo(now.toISOString().slice(0, 10));
+    setfechaPrestamo(today()); // hoy en hora local, no UTC (shared/utils/reportUtils)
     setObservations('');
     clearSelectedItems();
     setFormId(null);
@@ -223,6 +250,7 @@ export function useLoanManager() {
     }
 
     setSaving(true);
+    setSaveError(null);
     const selectedEmp = employees.find((x) => x.id === solicitanteId);
     const nameToSave = selectedEmp ? selectedEmp.name : 'Unknown';
     const solName = selectedEmp?.name || '';

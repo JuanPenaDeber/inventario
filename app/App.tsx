@@ -12,6 +12,7 @@ import {
 import ConfirmDialog, { ConfirmDialogState } from '@/shared/components/ConfirmDialog';
 import ErrorBoundary from '@/shared/components/ErrorBoundary';
 import CurrentUserBar from '@/shared/components/CurrentUserBar';
+import { ErrorBanner } from '@/shared/components/ui/States';
 import { useCurrentUser } from '@/shared/auth/CurrentUserContext';
 
 // Cada módulo carga su propio JS solo cuando se visita, en vez de que todos
@@ -354,12 +355,7 @@ const App: React.FC = () => {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:max-w-none">
           <CurrentUserBar />
           {error && (
-            <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 print:hidden">
-              <span>{error}</span>
-              <button onClick={() => setError(null)} aria-label="Cerrar aviso" className="shrink-0">
-                <X size={16} />
-              </button>
-            </div>
+            <ErrorBanner message={error} onDismiss={() => setError(null)} className="mb-6" />
           )}
           {/*
             Cada módulo tiene su propio ErrorBoundary (`compact`, ver el
